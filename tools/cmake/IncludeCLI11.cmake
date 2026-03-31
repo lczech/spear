@@ -41,7 +41,7 @@ else()
         FetchContent_Declare(
             CLI11
             GIT_REPOSITORY "https://github.com/CLIUtils/CLI11.git"
-            GIT_TAG        "${CLI11_COMMIT_HASH}"
+            GIT_TAG        "${CLI11_GIT_TAG}"
         )
         FetchContent_MakeAvailable(CLI11)
         set(CLI11_SOURCE "${CLI11_SOURCE_DIR}")
