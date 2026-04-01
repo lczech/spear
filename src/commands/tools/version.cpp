@@ -55,6 +55,19 @@ void setup_version( CLI::App& app )
     sub_version->callback( [ options ]() {
         run_version( *options );
     });
+
+    // Same for the ee command, but this time without options at all.
+    auto sub_ee = app.add_subcommand(
+        genesis::util::text::base64_decode_string(
+            "cXVvdGU="
+        ),
+        genesis::util::text::base64_decode_string(
+            "R2V0IHRoZSB3aXNkb20gb2YgdGhlIGFuY2llbnQgR3JlZWsgcGhpbG9zb3BoZXJzLg=="
+        )
+    )->group( "" );
+    sub_ee->callback( []() {
+        run_ee();
+    });
 }
 
 // =================================================================================================
@@ -76,4 +89,28 @@ void run_version( VersionOptions const& options )
     LOG_BOLD << "For license information, call  `spear tools license`";
     LOG_BOLD;
     LOG_BOLD << spear_title();
+}
+
+void run_ee()
+{
+    std::vector<std::string> qs = {
+        "Ikkga25vdyB0aGF0IEkga25vdyBub3RoaW5nLiIg4oCTIFNvY3JhdGVz", "IkFuIHVuZXhhbWluZWQgbGlmZSBpcy"
+        "Bub3Qgd29ydGggbGl2aW5nLiIg4oCTIFNvY3JhdGVz", "IlRoZSBvbmx5IHRydWUgd2lzZG9tIGlzIGluIGtub3dp"
+        "bmcgeW91IGtub3cgbm90aGluZy4iIOKAkyBTb2NyYXRlcw==", "Ildpc2UgbWVuIHNwZWFrIGJlY2F1c2UgdGhleS"
+        "BoYXZlIHNvbWV0aGluZyB0byBzYXk7IGZvb2xzIGJlY2F1c2UgdGhleSBoYXZlIHRvIHNheSBzb21ldGhpbmcuIiDi"
+        "gJMgUGxhdG8=","IldlIGFyZSB3aGF0IHdlIHJlcGVhdGVkbHkgZG8uIEV4Y2VsbGVuY2UsIHRoZW4sIGlzIG5vdCB"
+        "hbiBhY3QsIGJ1dCBhIGhhYml0LiIg4oCTIEFyaXN0b3RsZQ==", "IlRoZXJlIGlzIG5vdGhpbmcgcGVybWFuZW50I"
+        "GV4Y2VwdCBjaGFuZ2UuIiDigJMgSGVyYWNsaXR1cw==", "Ik5vIG1hbiBldmVyIHN0ZXBzIGluIHRoZSBzYW1lIHJ"
+        "pdmVyIHR3aWNlLiIg4oCTIEhlcmFjbGl0dXM=", "IkNoYXJhY3RlciBpcyBkZXN0aW55LiIg4oCTIEhlcmFjbGl0d"
+        "XM=", "IlRoZSBtaW5kIGlzIG5vdCBhIHZlc3NlbCB0byBiZSBmaWxsZWQgYnV0IGEgZmlyZSB0byBiZSBraW5kbGV"
+        "kLiIg4oCTIFBsdXRhcmNo", "Iktub3cgaG93IHRvIGxpc3RlbiBhbmQgeW91IHdpbGwgcHJvZml0IGV2ZW4gZnJvb"
+        "SB0aG9zZSB3aG8gdGFsayBiYWRseS4iIOKAkyBQbHV0YXJjaA==", "IldlYWx0aCBjb25zaXN0cyBub3QgaW4gaGF"
+        "2aW5nIGdyZWF0IHBvc3Nlc3Npb25zLCBidXQgaW4gaGF2aW5nIGZldyB3YW50cy4iIOKAkyBFcGljdGV0dXM=", "I"
+        "k5vIG1hbiBpcyBmcmVlIHdobyBpcyBub3QgYSBtYXN0ZXIgb2YgaGltc2VsZi4iIOKAkyBFcGljdGV0dXM="
+    };
+
+    auto const seed = std::chrono::system_clock::now().time_since_epoch().count();
+    std::default_random_engine engine( seed );
+    std::shuffle( qs.begin(), qs.end(), engine );
+    LOG_BOLD << genesis::util::text::base64_decode_string( qs[0] );
 }
