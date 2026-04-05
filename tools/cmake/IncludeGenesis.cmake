@@ -33,7 +33,7 @@ set(GENESIS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 
 # Check if the submodule was initialized; otherwise fetch from GitHub
 message (STATUS "Looking for genesis")
-set(genesis_SUBMODULE_DIR ${PROJECT_SOURCE_DIR}/libs/genesis)
+set(genesis_SUBMODULE_DIR ${PROJECT_SOURCE_DIR}/deps/genesis)
 if (EXISTS "${genesis_SUBMODULE_DIR}/CMakeLists.txt")
     message(STATUS "Using genesis submodule")
     set(genesis_SOURCE "${genesis_SUBMODULE_DIR}")

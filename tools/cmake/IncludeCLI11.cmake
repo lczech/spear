@@ -31,7 +31,7 @@ else()
 
     # Check if the submodule was initialized; otherwise fetch from GitHub
     message (STATUS "Looking for CLI11")
-    set(CLI11_SUBMODULE_DIR ${PROJECT_SOURCE_DIR}/libs/CLI11)
+    set(CLI11_SUBMODULE_DIR ${PROJECT_SOURCE_DIR}/deps/CLI11)
     if (EXISTS "${CLI11_SUBMODULE_DIR}/CMakeLists.txt")
         message(STATUS "Using CLI11 submodule")
         set(CLI11_SOURCE "${CLI11_SUBMODULE_DIR}")
