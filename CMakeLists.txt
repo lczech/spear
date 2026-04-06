@@ -216,6 +216,10 @@ target_link_libraries(spear PRIVATE genesis_lib_static)
 # target_link_libraries( spear ${GENESIS_LINK_LIBRARIES} )
 # target_link_libraries( spear PUBLIC genesis::genesis )
 
+# Add tests for spear-specific functionality
+enable_testing()
+add_subdirectory(${PROJECT_SOURCE_DIR}/test)
+
 # We have to use LTO for spear as well for some compilers to properly link, I think.
 if(GENESIS_HAS_LTO)
     message(STATUS "Building with LTO/IPO support")

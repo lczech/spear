@@ -1,0 +1,183 @@
+# SPEAR - Sorting Petabytes of Environmental and Ancient Reads
+# Copyright (C) 2026 Lucas Czech
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Contact:
+# Lucas Czech <lucas.czech@sund.ku.dk>
+# University of Copenhagen, Globe Institute, Section for GeoGenetics
+# Oster Voldgade 5-7, 1350 Copenhagen K, Denmark
+
+# ------------------------------------------------------------------------------
+#   Setup googletest
+# ------------------------------------------------------------------------------
+
+# Find GTest!
+message (STATUS "Looking for googletest")
+# set(googletest_GIT_TAG v1.17.0 CACHE STRING "Git tag or branch for googletest")
+SET( googletest_GIT_TAG "v1.17.0" ) #googletest_GIT_TAG#
+
+if (EXISTS "${PROJECT_SOURCE_DIR}/deps/googletest/CMakeLists.txt")
+    message(STATUS "Using googletest submodule")
+    add_subdirectory(
+        "${PROJECT_SOURCE_DIR}/deps/googletest"
+        "${CMAKE_BINARY_DIR}/googletest-build"
+    )
+else()
+    message(STATUS "googletest submodule not found")
+    message(STATUS "Fetching googletest from GitHub")
+
+    # If GTest was not found, we download and unpack it (at configure time). This roughly follows
+    # https://github.com/google/googletest/tree/master/googletest#incorporating-into-an-existing-cmake-project
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG        ${googletest_GIT_TAG}
+    )
+
+    # avoid overriding our runtime library flags
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+
+    # # Add googletest directly to our build. This defines the gtest and gtest_main targets.
+    # # We only want test, not mock.
+    # set(BUILD_GTEST ON  CACHE BOOL "Builds the googletest subproject")
+    # set(BUILD_GMOCK OFF CACHE BOOL "Builds the googlemock subproject")
+    # add_subdirectory( ${CMAKE_BINARY_DIR}/googletest-src  ${CMAKE_BINARY_DIR}/googletest-build )
+
+    # # The gtest/gtest_main targets carry header search path dependencies automatically when using
+    # # CMake 2.8.11 or later. Otherwise we have to add them here ourselves.
+    # if (${CMAKE_VERSION} VERSION_LESS 2.8.11)
+    #     include_directories( SYSTEM "${gtest_SOURCE_DIR}/include")
+    # endif()
+
+    # # Set targets to what they would be if we already had GTest. This way, we can use the same
+    # # target_link_libraries command.
+    # SET( GTEST_BOTH_LIBRARIES gtest_main gtest )
+    # SET( GTEST_LIBRARIES gtest )
+
+    message (STATUS "Finished downloading googletest")
+endif()
+
+# message (STATUS "Found googletest: ${GTEST_LIBRARIES}")
+message (STATUS "Found googletest")
+
+# We include the GTest dirs as SYSTEM, as they are currently producing ugly warnings that spam
+# our build output unnecessarily.
+include_directories( SYSTEM ${GTEST_INCLUDE_DIRS} )
+
+# ------------------------------------------------------------------------------
+#   Googletest Warnings
+# ------------------------------------------------------------------------------
+
+# Apple osx clang >= 9.3, some other versions of clang, as well as new gcc versions >= 9
+# spam a lot of warnings in googletest about implicitly-declared types being deprecated.
+# Let's silence them, as we are not interested in warnings about googletest.
+# That's something they have to fix!
+# Also, we have to use the double cmake version comparison here, as old osx cmake versions
+# do not yet have VERSION_GREATER_EQUAL, and crash otherwise...
+IF(
+    (
+        #APPLE AND
+        (CMAKE_CXX_COMPILER_ID STREQUAL "Clang") AND
+        ((CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "9.3") OR
+        (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "9.3"))
+    ) OR (
+        (CMAKE_CXX_COMPILER_ID STREQUAL "GNU") AND
+        ((CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "9") OR
+        (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "9"))
+    ) OR (
+        CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" AND
+        NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13"
+    )
+)
+    message (STATUS "Silencing -Wdeprecated-copy for building googletest.")
+
+    target_compile_options(gtest      PRIVATE "-Wno-deprecated-copy")
+    target_compile_options(gtest_main PRIVATE "-Wno-deprecated-copy")
+ENDIF()
+
+# Without any optimization, and with recent gcc, gtest causes some errors:
+# error: 'dummy' may be used uninitialized [-Werror=maybe-uninitialized]
+# Let's stop that from messing with our build - not our problem to fix!
+if(
+    "${CMAKE_CXX_FLAGS}" MATCHES "-O0" OR
+    "${CMAKE_CXX_FLAGS_DEBUG}" MATCHES "-O0" OR
+    (
+        (CMAKE_CXX_COMPILER_ID STREQUAL "GNU") AND
+        ((CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "9") OR
+        (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "9"))
+    )
+)
+    message (STATUS "Silencing -Wmaybe-uninitialized for building googletest.")
+
+    target_compile_options(gtest      PRIVATE "-Wno-uninitialized")
+    target_compile_options(gtest_main PRIVATE "-Wno-uninitialized")
+endif()
+
+# Furthermore, with recent clang versions, we get a `-Wdeprecated-declarations` on googletest.
+if(
+    CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
+    CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "18.0"
+)
+    message (STATUS "Silencing -Wdeprecated-declarations for building googletest.")
+
+    target_compile_options(gtest      PRIVATE -Wno-error=deprecated-declarations)
+    target_compile_options(gtest_main PRIVATE -Wno-error=deprecated-declarations)
+endif()
+
+# ------------------------------------------------------------------------------
+#   Sources
+# ------------------------------------------------------------------------------
+
+file (GLOB_RECURSE genesis_test_sources ${PROJECT_SOURCE_DIR}/test/src/*.cpp)
+include_directories (${PROJECT_SOURCE_DIR}/lib)
+include_directories (${PROJECT_SOURCE_DIR}/test)
+
+# ------------------------------------------------------------------------------
+#   Build Tests
+# ------------------------------------------------------------------------------
+
+set (EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
+
+add_executable        (spear_test ${genesis_test_sources})
+set_target_properties (spear_test PROPERTIES OUTPUT_NAME tests)
+
+target_link_libraries(spear_test PUBLIC genesis_lib_shared)
+target_link_libraries(spear_test PRIVATE GTest::gtest_main)
+# target_link_libraries (spear_test PUBLIC ${GTEST_BOTH_LIBRARIES})
+
+# explicitly add OpenMP, compatible with Macos/brew installed OpenMP after Cmake 3.12
+# if(${CMAKE_VERSION} VERSION_GREATER "3.9.0")
+#   if(OPENMP_FOUND)
+#     target_link_libraries (spear_test PUBLIC OpenMP::OpenMP_CXX)
+#   endif()
+# endif()
+
+# Link against any external libraries.
+target_link_libraries (spear_test PRIVATE ${GENESIS_INTERNAL_LINK_LIBRARIES})
+# IF(GENESIS_USE_HTSLIB)
+#     add_dependencies( spear_test htslib )
+#     # target_link_libraries(spear_test PRIVATE HTSlib::htslib)
+# ENDIF()
+# IF(GENESIS_USE_SAMTOOLS)
+#     add_dependencies( spear_test samtools )
+# ENDIF()
+
+# Need to specify the whole path here. For some reason, cmake does not
+# extract it from the executable name here...
+add_test (spear_test ${PROJECT_SOURCE_DIR}/bin/tests)
+
+# Final user message to signal the end of processing this file
+message (STATUS "${ColorBlue}Building tests${ColorEnd}")

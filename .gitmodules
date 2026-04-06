@@ -4,3 +4,6 @@
 [submodule "libs/genesis"]
 	path = deps/genesis
 	url = https://github.com/lczech/genesis.git
+[submodule "deps/googletest"]
+	path = deps/googletest
+	url = https://github.com/google/googletest.git
