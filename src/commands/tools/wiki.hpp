@@ -36,7 +36,7 @@ class WikiOptions
 {
 public:
 
-    std::string md_dir  = "doc/md/";
+    std::string md_dir  = "docs/md/";
     std::string out_dir = "../spear.wiki/";
     bool use_details = false;
 

@@ -15,6 +15,7 @@ build/
 TODO
 extern/
 ext/
+spear.code-workspace
 
 # --------------------------------------------------------------------
 #   Default C++ Ignores

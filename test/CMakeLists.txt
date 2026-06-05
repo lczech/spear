@@ -141,7 +141,7 @@ endif()
 #   Sources
 # ------------------------------------------------------------------------------
 
-file (GLOB_RECURSE genesis_test_sources ${PROJECT_SOURCE_DIR}/test/src/*.cpp)
+file (GLOB_RECURSE spear_test_sources ${PROJECT_SOURCE_DIR}/test/src/*.cpp)
 include_directories (${PROJECT_SOURCE_DIR}/lib)
 include_directories (${PROJECT_SOURCE_DIR}/test)
 
@@ -151,21 +151,30 @@ include_directories (${PROJECT_SOURCE_DIR}/test)
 
 set (EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
 
-add_executable        (spear_test ${genesis_test_sources})
+add_executable        (spear_test ${spear_test_sources})
 set_target_properties (spear_test PROPERTIES OUTPUT_NAME tests)
 
-target_link_libraries(spear_test PUBLIC genesis_lib_shared)
-target_link_libraries(spear_test PRIVATE GTest::gtest_main)
+target_include_directories(spear_test
+    PRIVATE
+    ${PROJECT_SOURCE_DIR}/test
+)
+target_link_libraries(spear_test
+    PRIVATE
+    spear_lib_static
+
+    # TODO doesn't work somehow. use the shared one? or fix it somehow?
+    # genesis_lib_static
+    genesis_lib_shared
+    GTest::gtest_main
+)
+
+# TODO
+# target_link_libraries(spear_test PUBLIC genesis_lib_shared)
+# target_link_libraries(spear_test PRIVATE GTest::gtest_main)
 # target_link_libraries (spear_test PUBLIC ${GTEST_BOTH_LIBRARIES})
 
-# explicitly add OpenMP, compatible with Macos/brew installed OpenMP after Cmake 3.12
-# if(${CMAKE_VERSION} VERSION_GREATER "3.9.0")
-#   if(OPENMP_FOUND)
-#     target_link_libraries (spear_test PUBLIC OpenMP::OpenMP_CXX)
-#   endif()
-# endif()
-
 # Link against any external libraries.
+# TODO
 target_link_libraries (spear_test PRIVATE ${GENESIS_INTERNAL_LINK_LIBRARIES})
 # IF(GENESIS_USE_HTSLIB)
 #     add_dependencies( spear_test htslib )

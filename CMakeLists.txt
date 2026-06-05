@@ -54,7 +54,7 @@ endif()
 #   Project Definition and Requirements
 # --------------------------------------------------------------------------------------------------
 
-project ( spear CXX )
+project ( spear CXX C )
 
 # We already check here whether the requirements for autotools are met,
 # as we need it in spear, but want to avoid the misleading error message from genesis
@@ -176,10 +176,12 @@ set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/tools/cma
 # Thus, do not replace the hashes manually!
 SET( CLI11_GIT_TAG "37bb6edc5317e99af72ef48405e65d9ca5218861" ) #CLI11_GIT_TAG#
 SET( genesis_GIT_TAG "dadd370f13a5333611e5c078ce9c86ecee41cd9f" ) #genesis_GIT_TAG#
+SET( TurboPFor_GIT_TAG "06d6aad98b4be5471289f35d5d04fac4469cf6df" ) #TurboPFor_GIT_TAG#
 
 # Include the libaries and make them available here
 include( IncludeCLI11 )
 include( IncludeGenesis )
+include( IncludeTurboPFor )
 
 # --------------------------------------------------------------------------------------------------
 #   Dependencies Settings
@@ -202,6 +204,9 @@ include_directories( SYSTEM "libs/CLI11/include" )
 #   Sources
 # ------------------------------------------------------------------------------
 
+# Add spear-specific library
+add_subdirectory(${PROJECT_SOURCE_DIR}/lib)
+
 # Find all source files. The CMake documentation does not recommend this,
 # but for our purposes, this is good enough for now.
 file (GLOB_RECURSE spear_sources ${PROJECT_SOURCE_DIR}/src/*.cpp)
@@ -210,7 +215,7 @@ file (GLOB_RECURSE spear_sources ${PROJECT_SOURCE_DIR}/src/*.cpp)
 # include_directories( "src" )
 add_executable( spear ${spear_sources} )
 target_include_directories(spear PRIVATE "${PROJECT_SOURCE_DIR}/src")
-target_link_libraries(spear PRIVATE genesis_lib_static)
+target_link_libraries(spear PRIVATE spear_lib_static genesis_lib_static)
 
 # Link it against Genesis, and against all dependencies of Genesis.
 # target_link_libraries( spear ${GENESIS_LINK_LIBRARIES} )
@@ -228,5 +233,5 @@ else()
     message(STATUS "Building without LTO/IPO support")
 endif()
 
-message( STATUS "CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS}" )
-message( STATUS "GENESIS_LINK_LIBRARIES ${GENESIS_LINK_LIBRARIES}" )
+# message( STATUS "CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS}" )
+# message( STATUS "GENESIS_LINK_LIBRARIES ${GENESIS_LINK_LIBRARIES}" )
