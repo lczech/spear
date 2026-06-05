@@ -48,7 +48,7 @@ namespace spear::inverted_index {
  * @return Number of bytes written to @p out.
  */
 [[nodiscard]] std::size_t pfor_encode_32(
-    std::uint32_t* in,
+    std::uint32_t const* in,
     std::size_t n,
     std::uint8_t* out
 );
@@ -58,7 +58,7 @@ namespace spear::inverted_index {
  * @return Number of bytes consumed from @p in.
  */
 [[nodiscard]] std::size_t pfor_decode_32(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint32_t* out
 );
@@ -72,7 +72,7 @@ namespace spear::inverted_index {
  * @return Number of bytes written to @p out.
  */
 [[nodiscard]] std::size_t pfor_encode_delta_32(
-    std::uint32_t* in,
+    std::uint32_t const* in,
     std::size_t n,
     std::uint8_t* out
 );
@@ -82,7 +82,7 @@ namespace spear::inverted_index {
  * @return Number of bytes consumed from @p in.
  */
 [[nodiscard]] std::size_t pfor_decode_delta_32(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint32_t* out
 );
@@ -96,7 +96,7 @@ namespace spear::inverted_index {
  * @return Number of bytes written to @p out.
  */
 [[nodiscard]] std::size_t pfor_encode_delta1_32(
-    std::uint32_t* in,
+    std::uint32_t const* in,
     std::size_t n,
     std::uint8_t* out
 );
@@ -106,7 +106,7 @@ namespace spear::inverted_index {
  * @return Number of bytes consumed from @p in.
  */
 [[nodiscard]] std::size_t pfor_decode_delta1_32(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint32_t* out
 );
@@ -126,7 +126,7 @@ namespace spear::inverted_index {
  * @return Number of bytes written to @p out.
  */
 [[nodiscard]] std::size_t pfor_encode_zigzag_32(
-    std::uint32_t* in,
+    std::uint32_t const* in,
     std::size_t n,
     std::uint8_t* out
 );
@@ -136,7 +136,7 @@ namespace spear::inverted_index {
  * @return Number of bytes consumed from @p in.
  */
 [[nodiscard]] std::size_t pfor_decode_zigzag_32(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint32_t* out
 );
@@ -159,7 +159,7 @@ namespace spear::inverted_index {
  * @return Number of bytes written to @p out.
  */
 [[nodiscard]] std::size_t pfor_encode_64(
-    std::uint64_t* in,
+    std::uint64_t const* in,
     std::size_t n,
     std::uint8_t* out
 );
@@ -169,7 +169,7 @@ namespace spear::inverted_index {
  * @return Number of bytes consumed from @p in.
  */
 [[nodiscard]] std::size_t pfor_decode_64(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint64_t* out
 );
@@ -183,7 +183,7 @@ namespace spear::inverted_index {
  * @return Number of bytes written to @p out.
  */
 [[nodiscard]] std::size_t pfor_encode_delta_64(
-    std::uint64_t* in,
+    std::uint64_t const* in,
     std::size_t n,
     std::uint8_t* out
 );
@@ -193,7 +193,7 @@ namespace spear::inverted_index {
  * @return Number of bytes consumed from @p in.
  */
 [[nodiscard]] std::size_t pfor_decode_delta_64(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint64_t* out
 );
@@ -207,7 +207,7 @@ namespace spear::inverted_index {
  * @return Number of bytes written to @p out.
  */
 [[nodiscard]] std::size_t pfor_encode_delta1_64(
-    std::uint64_t* in,
+    std::uint64_t const* in,
     std::size_t n,
     std::uint8_t* out
 );
@@ -217,7 +217,7 @@ namespace spear::inverted_index {
  * @return Number of bytes consumed from @p in.
  */
 [[nodiscard]] std::size_t pfor_decode_delta1_64(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint64_t* out
 );
@@ -237,7 +237,7 @@ namespace spear::inverted_index {
  * @return Number of bytes written to @p out.
  */
 [[nodiscard]] std::size_t pfor_encode_zigzag_64(
-    std::uint64_t* in,
+    std::uint64_t const* in,
     std::size_t n,
     std::uint8_t* out
 );
@@ -247,7 +247,7 @@ namespace spear::inverted_index {
  * @return Number of bytes consumed from @p in.
  */
 [[nodiscard]] std::size_t pfor_decode_zigzag_64(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint64_t* out
 );
@@ -278,7 +278,7 @@ template<typename T>
  * @return Number of bytes written to @p out.
  */
 template<typename T>
-[[nodiscard]] inline std::size_t pfor_encode( T* in, std::size_t n, std::uint8_t* out )
+[[nodiscard]] inline std::size_t pfor_encode( T const* in, std::size_t n, std::uint8_t* out )
 {
     static_assert(
         std::is_same_v<T, std::uint32_t> || std::is_same_v<T, std::uint64_t>,
@@ -296,7 +296,7 @@ template<typename T>
  * @return Number of bytes consumed from @p in.
  */
 template<typename T>
-[[nodiscard]] inline std::size_t pfor_decode( std::uint8_t* in, std::size_t n, T* out )
+[[nodiscard]] inline std::size_t pfor_decode( std::uint8_t const* in, std::size_t n, T* out )
 {
     static_assert(
         std::is_same_v<T, std::uint32_t> || std::is_same_v<T, std::uint64_t>,
@@ -314,7 +314,7 @@ template<typename T>
  * @return Number of bytes written to @p out.
  */
 template<typename T>
-[[nodiscard]] inline std::size_t pfor_encode_delta( T* in, std::size_t n, std::uint8_t* out )
+[[nodiscard]] inline std::size_t pfor_encode_delta( T const* in, std::size_t n, std::uint8_t* out )
 {
     static_assert(
         std::is_same_v<T, std::uint32_t> || std::is_same_v<T, std::uint64_t>,
@@ -332,7 +332,7 @@ template<typename T>
  * @return Number of bytes consumed from @p in.
  */
 template<typename T>
-[[nodiscard]] inline std::size_t pfor_decode_delta( std::uint8_t* in, std::size_t n, T* out )
+[[nodiscard]] inline std::size_t pfor_decode_delta( std::uint8_t const* in, std::size_t n, T* out )
 {
     static_assert(
         std::is_same_v<T, std::uint32_t> || std::is_same_v<T, std::uint64_t>,
@@ -350,7 +350,7 @@ template<typename T>
  * @return Number of bytes written to @p out.
  */
 template<typename T>
-[[nodiscard]] inline std::size_t pfor_encode_delta1( T* in, std::size_t n, std::uint8_t* out )
+[[nodiscard]] inline std::size_t pfor_encode_delta1( T const* in, std::size_t n, std::uint8_t* out )
 {
     static_assert(
         std::is_same_v<T, std::uint32_t> || std::is_same_v<T, std::uint64_t>,
@@ -368,7 +368,7 @@ template<typename T>
  * @return Number of bytes consumed from @p in.
  */
 template<typename T>
-[[nodiscard]] inline std::size_t pfor_decode_delta1( std::uint8_t* in, std::size_t n, T* out )
+[[nodiscard]] inline std::size_t pfor_decode_delta1( std::uint8_t const* in, std::size_t n, T* out )
 {
     static_assert(
         std::is_same_v<T, std::uint32_t> || std::is_same_v<T, std::uint64_t>,
@@ -390,7 +390,7 @@ template<typename T>
  * @return Number of bytes written to @p out.
  */
 template<typename T>
-[[nodiscard]] inline std::size_t pfor_encode_zigzag( T* in, std::size_t n, std::uint8_t* out )
+[[nodiscard]] inline std::size_t pfor_encode_zigzag( T const* in, std::size_t n, std::uint8_t* out )
 {
     static_assert(
         std::is_same_v<T, std::uint32_t> || std::is_same_v<T, std::uint64_t>,
@@ -408,7 +408,7 @@ template<typename T>
  * @return Number of bytes consumed from @p in.
  */
 template<typename T>
-[[nodiscard]] inline std::size_t pfor_decode_zigzag( std::uint8_t* in, std::size_t n, T* out )
+[[nodiscard]] inline std::size_t pfor_decode_zigzag( std::uint8_t const* in, std::size_t n, T* out )
 {
     static_assert(
         std::is_same_v<T, std::uint32_t> || std::is_same_v<T, std::uint64_t>,

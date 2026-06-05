@@ -42,7 +42,7 @@ std::size_t pfor_bound_32( std::size_t n ) noexcept
 }
 
 std::size_t pfor_encode_32(
-    std::uint32_t* in,
+    std::uint32_t const* in,
     std::size_t n,
     std::uint8_t* out
 ) {
@@ -50,11 +50,11 @@ std::size_t pfor_encode_32(
         return 0;
     }
 
-    return p4nenc32( in, n, reinterpret_cast<unsigned char*>( out ));
+    return p4nenc32( const_cast<std::uint32_t*>( in ), n, reinterpret_cast<unsigned char*>( out ));
 }
 
 std::size_t pfor_decode_32(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint32_t* out
 ) {
@@ -62,11 +62,11 @@ std::size_t pfor_decode_32(
         return 0;
     }
 
-    return p4ndec32( reinterpret_cast<unsigned char*>( in ), n, out );
+    return p4ndec32( const_cast<unsigned char*>( reinterpret_cast<unsigned char const*>( in )), n, out );
 }
 
 std::size_t pfor_encode_delta_32(
-    std::uint32_t* in,
+    std::uint32_t const* in,
     std::size_t n,
     std::uint8_t* out
 ) {
@@ -74,11 +74,11 @@ std::size_t pfor_encode_delta_32(
         return 0;
     }
 
-    return p4ndenc32( in, n, reinterpret_cast<unsigned char*>( out ));
+    return p4ndenc32( const_cast<std::uint32_t*>( in ), n, reinterpret_cast<unsigned char*>( out ));
 }
 
 std::size_t pfor_decode_delta_32(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint32_t* out
 ) {
@@ -86,11 +86,11 @@ std::size_t pfor_decode_delta_32(
         return 0;
     }
 
-    return p4nddec32( reinterpret_cast<unsigned char*>( in ), n, out );
+    return p4nddec32( const_cast<unsigned char*>( reinterpret_cast<unsigned char const*>( in )), n, out );
 }
 
 std::size_t pfor_encode_delta1_32(
-    std::uint32_t* in,
+    std::uint32_t const* in,
     std::size_t n,
     std::uint8_t* out
 ) {
@@ -98,11 +98,11 @@ std::size_t pfor_encode_delta1_32(
         return 0;
     }
 
-    return p4nd1enc32( in, n, reinterpret_cast<unsigned char*>( out ));
+    return p4nd1enc32( const_cast<std::uint32_t*>( in ), n, reinterpret_cast<unsigned char*>( out ));
 }
 
 std::size_t pfor_decode_delta1_32(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint32_t* out
 ) {
@@ -110,11 +110,11 @@ std::size_t pfor_decode_delta1_32(
         return 0;
     }
 
-    return p4nd1dec32( reinterpret_cast<unsigned char*>( in ), n, out );
+    return p4nd1dec32( const_cast<unsigned char*>( reinterpret_cast<unsigned char const*>( in )), n, out );
 }
 
 std::size_t pfor_encode_zigzag_32(
-    std::uint32_t* in,
+    std::uint32_t const* in,
     std::size_t n,
     std::uint8_t* out
 ) {
@@ -122,11 +122,11 @@ std::size_t pfor_encode_zigzag_32(
         return 0;
     }
 
-    return p4nzenc32( in, n, reinterpret_cast<unsigned char*>( out ));
+    return p4nzenc32( const_cast<std::uint32_t*>( in ), n, reinterpret_cast<unsigned char*>( out ));
 }
 
 std::size_t pfor_decode_zigzag_32(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint32_t* out
 ) {
@@ -134,7 +134,7 @@ std::size_t pfor_decode_zigzag_32(
         return 0;
     }
 
-    return p4nzdec32( reinterpret_cast<unsigned char*>( in ), n, out );
+    return p4nzdec32( const_cast<unsigned char*>( reinterpret_cast<unsigned char const*>( in )), n, out );
 }
 
 // =================================================================================================
@@ -147,7 +147,7 @@ std::size_t pfor_bound_64( std::size_t n ) noexcept
 }
 
 std::size_t pfor_encode_64(
-    std::uint64_t* in,
+    std::uint64_t const* in,
     std::size_t n,
     std::uint8_t* out
 ) {
@@ -155,11 +155,11 @@ std::size_t pfor_encode_64(
         return 0;
     }
 
-    return p4nenc64( in, n, reinterpret_cast<unsigned char*>( out ));
+    return p4nenc64( const_cast<std::uint64_t*>( in ), n, reinterpret_cast<unsigned char*>( out ));
 }
 
 std::size_t pfor_decode_64(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint64_t* out
 ) {
@@ -167,11 +167,11 @@ std::size_t pfor_decode_64(
         return 0;
     }
 
-    return p4ndec64( reinterpret_cast<unsigned char*>( in ), n, out );
+    return p4ndec64( const_cast<unsigned char*>( reinterpret_cast<unsigned char const*>( in )), n, out );
 }
 
 std::size_t pfor_encode_delta_64(
-    std::uint64_t* in,
+    std::uint64_t const* in,
     std::size_t n,
     std::uint8_t* out
 ) {
@@ -179,11 +179,11 @@ std::size_t pfor_encode_delta_64(
         return 0;
     }
 
-    return p4ndenc64( in, n, reinterpret_cast<unsigned char*>( out ));
+    return p4ndenc64( const_cast<std::uint64_t*>( in ), n, reinterpret_cast<unsigned char*>( out ));
 }
 
 std::size_t pfor_decode_delta_64(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint64_t* out
 ) {
@@ -191,11 +191,11 @@ std::size_t pfor_decode_delta_64(
         return 0;
     }
 
-    return p4nddec64( reinterpret_cast<unsigned char*>( in ), n, out );
+    return p4nddec64( const_cast<unsigned char*>( reinterpret_cast<unsigned char const*>( in )), n, out );
 }
 
 std::size_t pfor_encode_delta1_64(
-    std::uint64_t* in,
+    std::uint64_t const* in,
     std::size_t n,
     std::uint8_t* out
 ) {
@@ -203,11 +203,11 @@ std::size_t pfor_encode_delta1_64(
         return 0;
     }
 
-    return p4nd1enc64( in, n, reinterpret_cast<unsigned char*>( out ));
+    return p4nd1enc64( const_cast<std::uint64_t*>( in ), n, reinterpret_cast<unsigned char*>( out ));
 }
 
 std::size_t pfor_decode_delta1_64(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint64_t* out
 ) {
@@ -215,11 +215,11 @@ std::size_t pfor_decode_delta1_64(
         return 0;
     }
 
-    return p4nd1dec64( reinterpret_cast<unsigned char*>( in ), n, out );
+    return p4nd1dec64( const_cast<unsigned char*>( reinterpret_cast<unsigned char const*>( in )), n, out );
 }
 
 std::size_t pfor_encode_zigzag_64(
-    std::uint64_t* in,
+    std::uint64_t const* in,
     std::size_t n,
     std::uint8_t* out
 ) {
@@ -227,11 +227,11 @@ std::size_t pfor_encode_zigzag_64(
         return 0;
     }
 
-    return p4nzenc64( in, n, reinterpret_cast<unsigned char*>( out ));
+    return p4nzenc64( const_cast<std::uint64_t*>( in ), n, reinterpret_cast<unsigned char*>( out ));
 }
 
 std::size_t pfor_decode_zigzag_64(
-    std::uint8_t* in,
+    std::uint8_t const* in,
     std::size_t n,
     std::uint64_t* out
 ) {
@@ -239,7 +239,7 @@ std::size_t pfor_decode_zigzag_64(
         return 0;
     }
 
-    return p4nzdec64( reinterpret_cast<unsigned char*>( in ), n, out );
+    return p4nzdec64( const_cast<unsigned char*>( reinterpret_cast<unsigned char const*>( in )), n, out );
 }
 
 } // namespace spear::inverted_index
