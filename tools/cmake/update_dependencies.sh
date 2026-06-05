@@ -32,6 +32,9 @@
 # Change to main project dir. This ensures that the script can be called from any directory.
 cd "$(dirname "$0")/../.."
 
+# Where dependencies (submodules) are located.
+DEPENDENCY_DIR="deps"
+
 function get_git_tag() {
     local libname=${1}
 
@@ -45,8 +48,8 @@ function get_git_tag() {
     # This fails if the submodule is checked out, but not commited.
     # In that case, we only print a warning.
     local branch=`git rev-parse --abbrev-ref HEAD`
-    local hash_a=`git ls-files -s libs/${libname} | cut -d" " -f 2`
-    local hash_b=`git ls-tree ${branch} libs/${libname} | awk -F "[ \t]" '{print $3}'`
+    local hash_a=`git ls-files -s ${DEPENDENCY_DIR}/${libname} | cut -d" " -f 2`
+    local hash_b=`git ls-tree ${branch} ${DEPENDENCY_DIR}/${libname} | awk -F "[ \t]" '{print $3}'`
 
     if [[ ${hash_a} != ${hash_b} ]]; then
         echo -e "\e[31mProblem with commit hash for ${libname}: ${hash_a} != ${hash_b}\e[0m"
