@@ -85,8 +85,8 @@ set_target_properties(turbopfor PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # Public headers plus wrapper include directory for <turbopfor/ic.h>
 set(TURBOPFOR_WRAPPER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${TURBOPFOR_WRAPPER_DIR}/turbopfor")
-file(WRITE "${TURBOPFOR_WRAPPER_DIR}/turbopfor/ic.h"
-"#pragma once\n#include <ic.h>\n"
+file(GENERATE OUTPUT "${TURBOPFOR_WRAPPER_DIR}/turbopfor/ic.h"
+    CONTENT "#pragma once\n#include <ic.h>\n"
 )
 
 target_include_directories(turbopfor
