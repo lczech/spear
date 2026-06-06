@@ -37,6 +37,52 @@
 
 #include "genesis/util/core/logging.hpp"
 
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <stdexcept>
+#include <string>
+#include <unistd.h>
+
+// =================================================================================================
+//     Temp File Helper
+// =================================================================================================
+
+/**
+ * @brief RAII wrapper for a uniquely-named temporary file.
+ *
+ * Calls mkstemp() to guarantee a unique path, then immediately unlinks the empty placeholder
+ * so callers (e.g. InvertedIndexBuilder::write()) can create the file themselves without
+ * triggering the "file already exists" safety check.  The destructor unlinks whatever file
+ * exists at that path when the object goes out of scope.
+ */
+struct TempFile
+{
+    std::string path;
+
+    TempFile()
+    {
+        char tmpl[] = "/tmp/spear_test_XXXXXX";
+        int const fd = ::mkstemp( tmpl );
+        if( fd < 0 ) {
+            throw std::runtime_error(
+                std::string("mkstemp failed: ") + std::strerror(errno)
+            );
+        }
+        ::close( fd );
+        ::unlink( tmpl );
+        path = tmpl;
+    }
+
+    ~TempFile()
+    {
+        ::unlink( path.c_str() );
+    }
+
+    TempFile( TempFile const& ) = delete;
+    TempFile& operator=( TempFile const& ) = delete;
+};
+
 // =================================================================================================
 //     Compiler Details
 // =================================================================================================

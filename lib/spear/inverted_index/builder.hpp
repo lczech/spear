@@ -204,6 +204,7 @@ public:
             );
         }
         if(
+            cfg_.max_postings_per_term != 0 &&
             cfg_.max_postings_per_term >=
             static_cast<stored_count_type>(std::numeric_limits<stored_count_type>::max())
         ) {
@@ -319,10 +320,14 @@ public:
         };
 
         // Prepare stats. Histogram indices: 0 = empty, 1..max = count, max+1 = capped.
+        // Grown on demand so no-cap mode reflects actual distribution without pre-sizing.
         InvertedIndexStats stats;
-        stats.posting_count_histogram.assign(
-            static_cast<std::size_t>(cfg_.max_postings_per_term) + 2, 0
-        );
+        auto hist_inc = [&]( std::uint64_t val ) {
+            if( val >= stats.posting_count_histogram.size() ) {
+                stats.posting_count_histogram.resize( val + 1, 0 );
+            }
+            ++stats.posting_count_histogram[val];
+        };
 
         // Per-entry data accumulated during the blob write pass.
         // Not reserving, to avoid memory overhead until needed. We might have many terms,
@@ -344,7 +349,7 @@ public:
             // Capped entries do not have a blob, but store their post count.
             if( is_capped_(entry) ) {
                 post_counts.push_back( static_cast<std::uint64_t>(capped_sentinel()) );
-                stats.posting_count_histogram.back()++;
+                hist_inc( static_cast<std::uint64_t>(capped_sentinel()) );
                 reset_entry_(entry);
                 continue;
             }
@@ -356,15 +361,18 @@ public:
             // Empty entries store zero in the offset table for clarity.
             if( count == 0 ) {
                 post_counts.push_back( 0 );
-                stats.posting_count_histogram[0]++;
+                hist_inc( 0 );
                 reset_entry_(entry);
                 continue;
             }
 
             // Pending data may push a previously-uncapped entry over the cap threshold.
-            if( count > static_cast<std::size_t>(cfg_.max_postings_per_term) ) {
+            if(
+                cfg_.max_postings_per_term != 0 &&
+                count > static_cast<std::size_t>(cfg_.max_postings_per_term)
+            ) {
                 post_counts.push_back( static_cast<std::uint64_t>(capped_sentinel()) );
-                stats.posting_count_histogram.back()++;
+                hist_inc( static_cast<std::uint64_t>(capped_sentinel()) );
                 reset_entry_(entry);
                 continue;
             }
@@ -379,7 +387,7 @@ public:
 
             // Update stats and free compressed memory.
             post_counts.push_back( static_cast<std::uint64_t>(count) );
-            stats.posting_count_histogram[count]++;
+            hist_inc( static_cast<std::uint64_t>(count) );
             reset_entry_(entry);
             stats.total_blob_bytes += bytes_written;
             current_offset += bytes_written;
@@ -392,7 +400,12 @@ public:
             return val == 0 ? 1u : static_cast<std::size_t>(std::bit_width(val));
         };
         std::size_t const width_a = needed_bits( current_offset );
-        std::size_t const width_b = needed_bits( static_cast<std::uint64_t>(capped_sentinel()));
+        std::size_t const width_b = ( cfg_.max_postings_per_term != 0 )
+            ? needed_bits( static_cast<std::uint64_t>(capped_sentinel()))
+            : needed_bits( post_counts.empty()
+                ? 0u
+                : *std::max_element( post_counts.begin(), post_counts.end() ))
+        ;
         if( width_a + width_b > 64 ) {
             throw std::overflow_error(
                 "Offset table bit widths (" + std::to_string(width_a) + " + " +
@@ -419,7 +432,8 @@ public:
         ;
 
         // Write offset table (header + raw storage) via genesis I/O helper; verify byte count.
-        [[maybe_unused]] std::size_t const written = genesis::util::container::write(
+        using namespace genesis::util::container;
+        [[maybe_unused]] std::size_t const written = write_bitpacked_pair_vector(
             offset_table, fp
         );
         assert( written == static_cast<std::size_t>( offset_table_bytes ));
@@ -497,24 +511,38 @@ public:
      */
     [[nodiscard]] std::vector<position_type> postings(term_index_type term_index) const
     {
+        std::vector<position_type> result;
+        postings( term_index, result );
+        return result;
+    }
+
+    /**
+     * @brief Get the postings for a given term index, decompressed into @p target_buf.
+     *
+     * Resizes @p target_buf to the posting count and fills it with decoded positions.
+     * For capped or empty terms @p target_buf is cleared. Reusing @p target_buf across calls
+     * avoids repeated allocations on the hot path.
+     */
+    void postings(term_index_type term_index, std::vector<position_type>& target_buf) const
+    {
         auto const index = checked_index_(term_index);
         auto lock = guards_.get_lock_guard(index);
 
         // Check if the term is capped or has no data.
         Entry const& entry = entries_[index];
         if( is_capped_(entry) || entry.compressed_count == 0 ) {
-            return {};
+            target_buf.clear();
+            return;
         }
 
-        // Decode the compressed postings into a vector and return it.
+        // Decode the compressed postings into buf.
         // Auto-switch between 32 and 64 bit PFOR based on the position_type.
-        std::vector<position_type> result(entry.compressed_count);
-        (void) pfor_decode_delta1<position_type>(
+        target_buf.resize( static_cast<std::size_t>( entry.compressed_count ));
+        pfor_decode_delta1<position_type>(
             entry.compressed_positions.get(),
             static_cast<std::size_t>(entry.compressed_count),
-            result.data()
+            target_buf.data()
         );
-        return result;
     }
 
     // -------------------------------------------------------------------------
@@ -569,7 +597,10 @@ private:
 
     [[nodiscard]] inline bool is_capped_(Entry const& entry) const noexcept
     {
-        return entry.compressed_count == capped_sentinel();
+        return
+            cfg_.max_postings_per_term != 0 &&
+            entry.compressed_count == capped_sentinel()
+        ;
     }
 
     void cap_entry_(Entry& entry) noexcept
@@ -611,22 +642,33 @@ private:
             return;
         }
 
-        auto const& buffer = flush_to_buffer_(index, extra_position);
-        std::size_t const count = buffer.size();
+        auto const& decode_buf = flush_to_buffer_(index, extra_position);
+        std::size_t const count = decode_buf.size();
 
         // Cap if needed.
-        if( count > static_cast<std::size_t>(cfg_.max_postings_per_term) ) {
+        if(
+            cfg_.max_postings_per_term != 0 &&
+            count > static_cast<std::size_t>(cfg_.max_postings_per_term)
+        ) {
             cap_entry_(entry);
             return;
         }
 
         // Recompress and store in the entry.
-        std::size_t const bound = pfor_bound<position_type>(count);
-        auto new_bytes = std::make_unique<std::uint8_t[]>(bound);
-        (void) pfor_encode_delta1<position_type>(buffer.data(), count, new_bytes.get());
+        // Encode into a thread_local staging buffer sized for the worst case, then copy
+        // only the bytes actually written into a right-sized allocation. This avoids
+        // keeping a pfor_bound-sized block (8*n + n/128 bytes) alive per term for the
+        // entire lifetime of the builder, which adds up to gigabytes for large term counts.
+        static thread_local std::vector<std::uint8_t> encode_buf;
+        encode_buf.resize( pfor_bound<position_type>( count ));
+        std::size_t const bytes_written = pfor_encode_delta1<position_type>(
+            decode_buf.data(), count, encode_buf.data()
+        );
         if( count > static_cast<std::size_t>(std::numeric_limits<stored_count_type>::max()) ) {
             throw std::overflow_error("posting count exceeds StoredCountT");
         }
+        auto new_bytes = std::make_unique<std::uint8_t[]>( bytes_written );
+        std::memcpy( new_bytes.get(), encode_buf.data(), bytes_written );
         entry.compressed_positions = std::move(new_bytes);
         entry.compressed_count = static_cast<stored_count_type>(count);
     }

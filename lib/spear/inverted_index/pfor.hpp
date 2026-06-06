@@ -57,7 +57,7 @@ namespace spear::inverted_index {
  * @brief PFor-decode @p n uint32_t integers from @p in into @p out.
  * @return Number of bytes consumed from @p in.
  */
-[[nodiscard]] std::size_t pfor_decode_32(
+std::size_t pfor_decode_32(
     std::uint8_t const* in,
     std::size_t n,
     std::uint32_t* out
@@ -81,7 +81,7 @@ namespace spear::inverted_index {
  * @brief PFor-decode @p n non-decreasing uint32_t integers from delta-coded @p in.
  * @return Number of bytes consumed from @p in.
  */
-[[nodiscard]] std::size_t pfor_decode_delta_32(
+std::size_t pfor_decode_delta_32(
     std::uint8_t const* in,
     std::size_t n,
     std::uint32_t* out
@@ -105,7 +105,7 @@ namespace spear::inverted_index {
  * @brief PFor-decode @p n strictly increasing uint32_t integers from delta-1-coded @p in.
  * @return Number of bytes consumed from @p in.
  */
-[[nodiscard]] std::size_t pfor_decode_delta1_32(
+std::size_t pfor_decode_delta1_32(
     std::uint8_t const* in,
     std::size_t n,
     std::uint32_t* out
@@ -135,7 +135,7 @@ namespace spear::inverted_index {
  * @brief PFor-decode @p n uint32_t integers from zigzag-of-delta-coded @p in.
  * @return Number of bytes consumed from @p in.
  */
-[[nodiscard]] std::size_t pfor_decode_zigzag_32(
+std::size_t pfor_decode_zigzag_32(
     std::uint8_t const* in,
     std::size_t n,
     std::uint32_t* out
@@ -168,7 +168,7 @@ namespace spear::inverted_index {
  * @brief PFor-decode @p n uint64_t integers from @p in into @p out.
  * @return Number of bytes consumed from @p in.
  */
-[[nodiscard]] std::size_t pfor_decode_64(
+std::size_t pfor_decode_64(
     std::uint8_t const* in,
     std::size_t n,
     std::uint64_t* out
@@ -192,7 +192,7 @@ namespace spear::inverted_index {
  * @brief PFor-decode @p n non-decreasing uint64_t integers from delta-coded @p in.
  * @return Number of bytes consumed from @p in.
  */
-[[nodiscard]] std::size_t pfor_decode_delta_64(
+std::size_t pfor_decode_delta_64(
     std::uint8_t const* in,
     std::size_t n,
     std::uint64_t* out
@@ -216,7 +216,7 @@ namespace spear::inverted_index {
  * @brief PFor-decode @p n strictly increasing uint64_t integers from delta-1-coded @p in.
  * @return Number of bytes consumed from @p in.
  */
-[[nodiscard]] std::size_t pfor_decode_delta1_64(
+std::size_t pfor_decode_delta1_64(
     std::uint8_t const* in,
     std::size_t n,
     std::uint64_t* out
@@ -246,7 +246,7 @@ namespace spear::inverted_index {
  * @brief PFor-decode @p n uint64_t integers from zigzag-of-delta-coded @p in.
  * @return Number of bytes consumed from @p in.
  */
-[[nodiscard]] std::size_t pfor_decode_zigzag_64(
+std::size_t pfor_decode_zigzag_64(
     std::uint8_t const* in,
     std::size_t n,
     std::uint64_t* out
@@ -296,7 +296,7 @@ template<typename T>
  * @return Number of bytes consumed from @p in.
  */
 template<typename T>
-[[nodiscard]] inline std::size_t pfor_decode( std::uint8_t const* in, std::size_t n, T* out )
+inline std::size_t pfor_decode( std::uint8_t const* in, std::size_t n, T* out )
 {
     static_assert(
         std::is_same_v<T, std::uint32_t> || std::is_same_v<T, std::uint64_t>,
@@ -332,7 +332,7 @@ template<typename T>
  * @return Number of bytes consumed from @p in.
  */
 template<typename T>
-[[nodiscard]] inline std::size_t pfor_decode_delta( std::uint8_t const* in, std::size_t n, T* out )
+inline std::size_t pfor_decode_delta( std::uint8_t const* in, std::size_t n, T* out )
 {
     static_assert(
         std::is_same_v<T, std::uint32_t> || std::is_same_v<T, std::uint64_t>,
@@ -368,7 +368,7 @@ template<typename T>
  * @return Number of bytes consumed from @p in.
  */
 template<typename T>
-[[nodiscard]] inline std::size_t pfor_decode_delta1( std::uint8_t const* in, std::size_t n, T* out )
+inline std::size_t pfor_decode_delta1( std::uint8_t const* in, std::size_t n, T* out )
 {
     static_assert(
         std::is_same_v<T, std::uint32_t> || std::is_same_v<T, std::uint64_t>,
@@ -408,7 +408,7 @@ template<typename T>
  * @return Number of bytes consumed from @p in.
  */
 template<typename T>
-[[nodiscard]] inline std::size_t pfor_decode_zigzag( std::uint8_t const* in, std::size_t n, T* out )
+inline std::size_t pfor_decode_zigzag( std::uint8_t const* in, std::size_t n, T* out )
 {
     static_assert(
         std::is_same_v<T, std::uint32_t> || std::is_same_v<T, std::uint64_t>,
