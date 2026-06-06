@@ -561,6 +561,14 @@ private:
 
         // Number of pending positions currently in the pending buffer for this term index.
         pending_count_type pending_count = 0;
+
+        // We make compressed_positions grow geometrically, to avoid allocating new memory on every
+        // flush. This allows to store its size as an power-of-two exponent of allocated capacity:
+        // capacity = 1 << compressed_exponent. Meaningful only when compressed_positions != nullptr.
+        // Using uint8_t here also keeps Entry at 16 bytes (with padding due to the pointer
+        // alignment needed) for a wider range of template combinations, and normalises
+        // allocation sizes to powers of two for better allocator bin reuse across terms.
+        std::uint8_t compressed_exponent = 0;
     };
 
     [[nodiscard]] static std::size_t get_pending_storage_size_(
@@ -606,6 +614,7 @@ private:
     void cap_entry_(Entry& entry) noexcept
     {
         entry.compressed_positions.reset();
+        entry.compressed_exponent = 0;
         entry.compressed_count = capped_sentinel();
         entry.pending_count = 0;
     }
@@ -613,6 +622,7 @@ private:
     void reset_entry_(Entry& entry) noexcept
     {
         entry.compressed_positions.reset();
+        entry.compressed_exponent = 0;
         entry.compressed_count = 0;
         entry.pending_count = 0;
     }
@@ -642,10 +652,11 @@ private:
             return;
         }
 
+        // Get the merged existing + pending + extra data into a thread_local buffer.
         auto const& decode_buf = flush_to_buffer_(index, extra_position);
         std::size_t const count = decode_buf.size();
 
-        // Cap if needed.
+        // Cap if we now exceed the max postings per term.
         if(
             cfg_.max_postings_per_term != 0 &&
             count > static_cast<std::size_t>(cfg_.max_postings_per_term)
@@ -655,10 +666,10 @@ private:
         }
 
         // Recompress and store in the entry.
-        // Encode into a thread_local staging buffer sized for the worst case, then copy
-        // only the bytes actually written into a right-sized allocation. This avoids
-        // keeping a pfor_bound-sized block (8*n + n/128 bytes) alive per term for the
-        // entire lifetime of the builder, which adds up to gigabytes for large term counts.
+        // Encode into a thread_local staging buffer sized for the worst case, then memcpy
+        // only the bytes actually written into the entry's buffer. The entry buffer grows
+        // geometrically (2×) when needed, so most flushes are a plain memcpy with no
+        // malloc/free — O(log flushes) allocations per term over the build lifetime.
         static thread_local std::vector<std::uint8_t> encode_buf;
         encode_buf.resize( pfor_bound<position_type>( count ));
         std::size_t const bytes_written = pfor_encode_delta1<position_type>(
@@ -667,9 +678,26 @@ private:
         if( count > static_cast<std::size_t>(std::numeric_limits<stored_count_type>::max()) ) {
             throw std::overflow_error("posting count exceeds StoredCountT");
         }
-        auto new_bytes = std::make_unique<std::uint8_t[]>( bytes_written );
-        std::memcpy( new_bytes.get(), encode_buf.data(), bytes_written );
-        entry.compressed_positions = std::move(new_bytes);
+
+        // Check if new allocation is needed or current size of compressed_positions is sufficient.
+        if(
+            !entry.compressed_positions ||
+            bytes_written > (std::size_t{1} << entry.compressed_exponent)
+        ) {
+            // Round up to the next power of two: exponent = ceil(log2(bytes_written)).
+            std::size_t const new_exp = std::bit_width( bytes_written - 1 );
+            if( new_exp > std::numeric_limits<std::uint8_t>::max() ) {
+                // That is large... still checking.
+                throw std::overflow_error("compressed_exponent exceeds uint8_t");
+            }
+            entry.compressed_positions = std::make_unique<std::uint8_t[]>(
+                std::size_t{1} << new_exp
+            );
+            entry.compressed_exponent = static_cast<std::uint8_t>( new_exp );
+        }
+
+        // Store the compressed data and count in the entry.
+        std::memcpy( entry.compressed_positions.get(), encode_buf.data(), bytes_written );
         entry.compressed_count = static_cast<stored_count_type>(count);
     }
 
