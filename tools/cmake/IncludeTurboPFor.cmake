@@ -105,6 +105,12 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     )
 endif()
 
+# GCC 14+ made -Wincompatible-pointer-types a hard error for C; suppress it
+# for this third-party library without touching its sources.
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(turbopfor PRIVATE -Wno-incompatible-pointer-types)
+endif()
+
 target_compile_definitions(turbopfor PRIVATE NDEBUG)
 
 # Match upstream arch defaults reasonably closely.
