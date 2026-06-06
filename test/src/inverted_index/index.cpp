@@ -121,27 +121,47 @@ TEST( InvertedIndex, RoundTripLoadAll )
     // Term 0: empty
     EXPECT_EQ( idx.posting_count( 0 ), 0u );
     EXPECT_FALSE( idx.is_capped( 0 ) );
-    EXPECT_EQ( idx.postings( 0 ), ( std::vector<std::uint64_t>{} ));
+    {
+        auto const [posts, status] = idx.postings( 0 );
+        EXPECT_EQ( status, Index::PostingsStatus::kEmpty );
+        EXPECT_TRUE( posts.empty() );
+    }
 
     // Term 1: normal
     EXPECT_EQ( idx.posting_count( 1 ), 3u );
     EXPECT_FALSE( idx.is_capped( 1 ) );
-    EXPECT_EQ( idx.postings( 1 ), ( std::vector<std::uint64_t>{ 10, 20, 30 } ));
+    {
+        auto const [posts, status] = idx.postings( 1 );
+        EXPECT_EQ( status, Index::PostingsStatus::kFound );
+        EXPECT_EQ( posts, ( std::vector<std::uint64_t>{ 10, 20, 30 } ));
+    }
 
     // Term 2: normal
     EXPECT_EQ( idx.posting_count( 2 ), 2u );
     EXPECT_FALSE( idx.is_capped( 2 ) );
-    EXPECT_EQ( idx.postings( 2 ), ( std::vector<std::uint64_t>{ 100, 200 } ));
+    {
+        auto const [posts, status] = idx.postings( 2 );
+        EXPECT_EQ( status, Index::PostingsStatus::kFound );
+        EXPECT_EQ( posts, ( std::vector<std::uint64_t>{ 100, 200 } ));
+    }
 
     // Term 3: capped
     EXPECT_EQ( idx.posting_count( 3 ), idx.capped_sentinel() );
     EXPECT_TRUE( idx.is_capped( 3 ) );
-    EXPECT_EQ( idx.postings( 3 ), ( std::vector<std::uint64_t>{} ));
+    {
+        auto const [posts, status] = idx.postings( 3 );
+        EXPECT_EQ( status, Index::PostingsStatus::kCapped );
+        EXPECT_TRUE( posts.empty() );
+    }
 
     // Term 4: normal
     EXPECT_EQ( idx.posting_count( 4 ), 1u );
     EXPECT_FALSE( idx.is_capped( 4 ) );
-    EXPECT_EQ( idx.postings( 4 ), ( std::vector<std::uint64_t>{ 42 } ));
+    {
+        auto const [posts, status] = idx.postings( 4 );
+        EXPECT_EQ( status, Index::PostingsStatus::kFound );
+        EXPECT_EQ( posts, ( std::vector<std::uint64_t>{ 42 } ));
+    }
 }
 
 TEST( InvertedIndex, RoundTripPread )
@@ -155,27 +175,47 @@ TEST( InvertedIndex, RoundTripPread )
     // Term 0: empty
     EXPECT_EQ( idx.posting_count( 0 ), 0u );
     EXPECT_FALSE( idx.is_capped( 0 ) );
-    EXPECT_EQ( idx.postings( 0 ), ( std::vector<std::uint64_t>{} ));
+    {
+        auto const [posts, status] = idx.postings( 0 );
+        EXPECT_EQ( status, Index::PostingsStatus::kEmpty );
+        EXPECT_TRUE( posts.empty() );
+    }
 
     // Term 1: normal
     EXPECT_EQ( idx.posting_count( 1 ), 3u );
     EXPECT_FALSE( idx.is_capped( 1 ) );
-    EXPECT_EQ( idx.postings( 1 ), ( std::vector<std::uint64_t>{ 10, 20, 30 } ));
+    {
+        auto const [posts, status] = idx.postings( 1 );
+        EXPECT_EQ( status, Index::PostingsStatus::kFound );
+        EXPECT_EQ( posts, ( std::vector<std::uint64_t>{ 10, 20, 30 } ));
+    }
 
     // Term 2: normal
     EXPECT_EQ( idx.posting_count( 2 ), 2u );
     EXPECT_FALSE( idx.is_capped( 2 ) );
-    EXPECT_EQ( idx.postings( 2 ), ( std::vector<std::uint64_t>{ 100, 200 } ));
+    {
+        auto const [posts, status] = idx.postings( 2 );
+        EXPECT_EQ( status, Index::PostingsStatus::kFound );
+        EXPECT_EQ( posts, ( std::vector<std::uint64_t>{ 100, 200 } ));
+    }
 
     // Term 3: capped
     EXPECT_EQ( idx.posting_count( 3 ), idx.capped_sentinel() );
     EXPECT_TRUE( idx.is_capped( 3 ) );
-    EXPECT_EQ( idx.postings( 3 ), ( std::vector<std::uint64_t>{} ));
+    {
+        auto const [posts, status] = idx.postings( 3 );
+        EXPECT_EQ( status, Index::PostingsStatus::kCapped );
+        EXPECT_TRUE( posts.empty() );
+    }
 
     // Term 4: normal
     EXPECT_EQ( idx.posting_count( 4 ), 1u );
     EXPECT_FALSE( idx.is_capped( 4 ) );
-    EXPECT_EQ( idx.postings( 4 ), ( std::vector<std::uint64_t>{ 42 } ));
+    {
+        auto const [posts, status] = idx.postings( 4 );
+        EXPECT_EQ( status, Index::PostingsStatus::kFound );
+        EXPECT_EQ( posts, ( std::vector<std::uint64_t>{ 42 } ));
+    }
 }
 
 TEST( InvertedIndex, OutOfRange )
@@ -231,7 +271,7 @@ TEST( InvertedIndex, MoveConstructor )
 
     EXPECT_FALSE( idx1.is_open() );
     EXPECT_TRUE( idx2.is_open() );
-    EXPECT_EQ( idx2.postings( 1 ), ( std::vector<std::uint64_t>{ 10, 20, 30 } ));
+    EXPECT_EQ( idx2.postings( 1 ).first, ( std::vector<std::uint64_t>{ 10, 20, 30 } ));
 }
 
 TEST( InvertedIndex, MoveAssignment )
@@ -247,7 +287,7 @@ TEST( InvertedIndex, MoveAssignment )
 
     EXPECT_FALSE( idx1.is_open() );
     EXPECT_TRUE( idx2.is_open() );
-    EXPECT_EQ( idx2.postings( 4 ), ( std::vector<std::uint64_t>{ 42 } ));
+    EXPECT_EQ( idx2.postings( 4 ).first, ( std::vector<std::uint64_t>{ 42 } ));
 }
 
 TEST( InvertedIndex, Reopen )
@@ -272,12 +312,12 @@ TEST( InvertedIndex, Reopen )
 
     idx.open( tmp1.path, Index::OpenMode::kPread );
     EXPECT_EQ( idx.num_terms(), 3u );
-    EXPECT_EQ( idx.postings( 0 ), ( std::vector<std::uint64_t>{ 5 } ));
+    EXPECT_EQ( idx.postings( 0 ).first, ( std::vector<std::uint64_t>{ 5 } ));
 
     // Reopen with a different file — old fd must be released cleanly
     idx.open( tmp2.path, Index::OpenMode::kPread );
     EXPECT_EQ( idx.num_terms(), 2u );
-    EXPECT_EQ( idx.postings( 0 ), ( std::vector<std::uint64_t>{ 99 } ));
+    EXPECT_EQ( idx.postings( 0 ).first, ( std::vector<std::uint64_t>{ 99 } ));
 }
 
 // =================================================================================================
@@ -316,20 +356,23 @@ TEST( InvertedIndex, NoCapRoundTripLoadAll )
     // Term 0: 2000 postings — would be capped under the default limit of 1024
     EXPECT_EQ( idx.posting_count( 0 ), 2000u );
     EXPECT_FALSE( idx.is_capped( 0 ) );
-    auto const posts0 = idx.postings( 0 );
-    ASSERT_EQ( posts0.size(), 2000u );
-    EXPECT_EQ( posts0.front(), 0u );
-    EXPECT_EQ( posts0.back(), 1999u );
+    {
+        auto const [posts, status] = idx.postings( 0 );
+        EXPECT_EQ( status, Index::PostingsStatus::kFound );
+        ASSERT_EQ( posts.size(), 2000u );
+        EXPECT_EQ( posts.front(), 0u );
+        EXPECT_EQ( posts.back(), 1999u );
+    }
 
     // Term 1: normal
     EXPECT_EQ( idx.posting_count( 1 ), 5u );
     EXPECT_FALSE( idx.is_capped( 1 ) );
-    EXPECT_EQ( idx.postings( 1 ), ( std::vector<std::uint64_t>{ 10, 20, 30, 40, 50 } ));
+    EXPECT_EQ( idx.postings( 1 ).first, ( std::vector<std::uint64_t>{ 10, 20, 30, 40, 50 } ));
 
     // Term 2: empty
     EXPECT_EQ( idx.posting_count( 2 ), 0u );
     EXPECT_FALSE( idx.is_capped( 2 ) );
-    EXPECT_EQ( idx.postings( 2 ), ( std::vector<std::uint64_t>{} ));
+    EXPECT_EQ( idx.postings( 2 ).second, Index::PostingsStatus::kEmpty );
 }
 
 TEST( InvertedIndex, NoCapRoundTripPread )
@@ -343,20 +386,23 @@ TEST( InvertedIndex, NoCapRoundTripPread )
     // Term 0: 2000 postings — would be capped under the default limit of 1024
     EXPECT_EQ( idx.posting_count( 0 ), 2000u );
     EXPECT_FALSE( idx.is_capped( 0 ) );
-    auto const posts0 = idx.postings( 0 );
-    ASSERT_EQ( posts0.size(), 2000u );
-    EXPECT_EQ( posts0.front(), 0u );
-    EXPECT_EQ( posts0.back(), 1999u );
+    {
+        auto const [posts, status] = idx.postings( 0 );
+        EXPECT_EQ( status, Index::PostingsStatus::kFound );
+        ASSERT_EQ( posts.size(), 2000u );
+        EXPECT_EQ( posts.front(), 0u );
+        EXPECT_EQ( posts.back(), 1999u );
+    }
 
     // Term 1: normal
     EXPECT_EQ( idx.posting_count( 1 ), 5u );
     EXPECT_FALSE( idx.is_capped( 1 ) );
-    EXPECT_EQ( idx.postings( 1 ), ( std::vector<std::uint64_t>{ 10, 20, 30, 40, 50 } ));
+    EXPECT_EQ( idx.postings( 1 ).first, ( std::vector<std::uint64_t>{ 10, 20, 30, 40, 50 } ));
 
     // Term 2: empty
     EXPECT_EQ( idx.posting_count( 2 ), 0u );
     EXPECT_FALSE( idx.is_capped( 2 ) );
-    EXPECT_EQ( idx.postings( 2 ), ( std::vector<std::uint64_t>{} ));
+    EXPECT_EQ( idx.postings( 2 ).second, Index::PostingsStatus::kEmpty );
 }
 
 // =================================================================================================
@@ -539,7 +585,7 @@ static void run_stress_nocap_(
             << "term=" << term << " threads=" << num_threads << " terms=" << num_terms;
         ASSERT_EQ( idx.posting_count( term ), num_threads * P )
             << "term=" << term << " threads=" << num_threads << " terms=" << num_terms;
-        EXPECT_EQ( idx.postings( term ), expected )
+        EXPECT_EQ( idx.postings( term ).first, expected )
             << "term=" << term << " threads=" << num_threads << " terms=" << num_terms;
     }
 }
@@ -610,7 +656,7 @@ static void run_stress_capped_(
             << "light term=" << term << " threads=" << num_threads;
         EXPECT_EQ( idx.posting_count( term ), num_threads )
             << "light term=" << term;
-        EXPECT_EQ( idx.postings( term ), expected_light )
+        EXPECT_EQ( idx.postings( term ).first, expected_light )
             << "light term=" << term;
     }
     for( std::size_t term = half; term < num_terms; ++term ) {

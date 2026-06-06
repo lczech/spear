@@ -48,6 +48,7 @@
 #include <string>
 #include <type_traits>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace spear::inverted_index {
@@ -69,13 +70,13 @@ namespace spear::inverted_index {
  *     All postings() calls are pointer arithmetic + PFor decode; no further I/O.
  *     Recommended for cluster nodes with sufficient RAM.
  *
- *   - **pread**: only the footer and offset table are loaded; the blob stays on disk.
+ *   - **kPread**: only the footer and offset table are loaded; the blob stays on disk.
  *     Each postings() call issues a `pread()` syscall for exactly the compressed bytes
  *     of the requested term. Thread-safe. Suitable when the blob does not fit in RAM,
  *     and the I/O overhead is acceptable (e.g., on a fast SSD or NVMe).
  *
  * Both modes are safe to call from multiple threads concurrently: in kLoadAll mode all
- * state is read-only after open(); in pread mode each thread uses a thread_local decode
+ * state is read-only after open(); in kPread mode each thread uses a thread_local decode
  * buffer and `pread()` is inherently thread-safe.
  *
  * @tparam PositionT
@@ -101,7 +102,7 @@ public:
     );
 
     // -------------------------------------------------------------------------
-    //     Open Modes
+    //     Open Modes and Status
     // -------------------------------------------------------------------------
 
     /**
@@ -114,6 +115,21 @@ public:
 
         /// Keep blob on disk; issue one pread() per postings() call.
         kPread
+    };
+
+    /**
+     * @brief Result status returned by postings().
+     */
+    enum class PostingsStatus : std::uint8_t
+    {
+        /// The term has no postings; result is empty.
+        kEmpty,
+
+        /// The posting list was decoded into the output buffer.
+        kFound,
+
+        /// The term exceeded max_postings_per_term and was discarded; result is empty.
+        kCapped
     };
 
     // -------------------------------------------------------------------------
@@ -253,25 +269,28 @@ public:
     /**
      * @brief Decode and return the posting list for @p term_index.
      *
-     * Returns an empty vector for empty or capped terms.
+     * Returns the PostingsStatus as well to indicate the status of the result.
      * Thread-safe in both OpenMode variants.
      */
-    [[nodiscard]] std::vector<PositionT> postings( term_index_type term_index ) const
+    [[nodiscard]] std::pair<std::vector<PositionT>, PostingsStatus>
+    postings( term_index_type term_index ) const
     {
         std::vector<PositionT> buf;
-        postings( term_index, buf );
-        return buf;
+        PostingsStatus const status = postings( term_index, buf );
+        return { std::move( buf ), status };
     }
 
     /**
-     * @brief Decode the posting list for @p term_index into @p buf.
+     * @brief Decode the posting list for @p term_index into @p target_buf.
      *
-     * Resizes @p buf to the posting count and fills it with decoded positions.
-     * For empty or capped terms @p buf is cleared. Reusing @p buf across calls
-     * avoids repeated allocations on the hot path.
+     * Resizes @p target_buf to the posting count and fills it with decoded positions.
+     * For empty or capped terms @p target_buf is cleared.  Reusing @p target_buf across
+     * calls avoids repeated allocations on the hot path.
+     * Returns PostingsStatus::kFound, kEmpty, or kCapped accordingly.
      * Thread-safe in both OpenMode variants.
      */
-    void postings( term_index_type term_index, std::vector<PositionT>& target_buf ) const
+    PostingsStatus
+    postings( term_index_type term_index, std::vector<PositionT>& target_buf ) const
     {
         assert( footer_.magic == INVERTED_INDEX_MAGIC );
         assert( footer_.num_terms == offset_table_.size() );
@@ -288,9 +307,13 @@ public:
         auto const [byte_offset, count] = offset_table_[term_index];
 
         // Empty and capped terms carry no blob data
-        if( count == 0 || ( footer_.max_postings_per_term != 0 && count >= capped_sentinel() )) {
+        if( count == 0 ) {
             target_buf.clear();
-            return;
+            return PostingsStatus::kEmpty;
+        }
+        if( footer_.max_postings_per_term != 0 && count >= capped_sentinel() ) {
+            target_buf.clear();
+            return PostingsStatus::kCapped;
         }
 
         // Resize the output buffer to hold exactly the decoded positions
@@ -339,6 +362,7 @@ public:
             );
             assert( decoded_bytes == blob_bytes );
         }
+        return PostingsStatus::kFound;
     }
 
     // -------------------------------------------------------------------------
