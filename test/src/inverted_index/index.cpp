@@ -448,6 +448,7 @@ TEST( InvertedIndex, DISABLED_LargeScalePerf )
               << "  (" << num_postings / ( build_ms / 1e3 ) / 1e6 << " M postings/s)\n";
 
     // ---- Write ----
+    std::remove( path.c_str() );  // delete previous run's output if present
     auto t1 = Clock::now();
     builder.write( path );
     double const write_ms = Ms( Clock::now() - t1 ).count();

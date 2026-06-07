@@ -43,7 +43,6 @@
 #include <cstring>
 #include <iostream>
 #include <limits>
-#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -184,8 +183,8 @@ public:
 
     explicit InvertedIndexBuilder( std::size_t num_term_indices, Config cfg = Config{} )
         : cfg_(cfg)
-        , entries_(num_term_indices)
         , pending_positions_(get_pending_storage_size_(num_term_indices, cfg.pending_capacity))
+        , entries_(num_term_indices)
         , guards_(
             cfg.num_guard_buckets == 0
             ? genesis::util::threading::ConcurrentVectorGuard(
@@ -216,12 +215,48 @@ public:
     }
 
     InvertedIndexBuilder( InvertedIndexBuilder const& ) = delete;
-    InvertedIndexBuilder( InvertedIndexBuilder&& )      = default;
+
+    InvertedIndexBuilder( InvertedIndexBuilder&& other ) noexcept
+        : cfg_(std::move(other.cfg_))
+        , pending_positions_(std::move(other.pending_positions_))
+        , entries_(std::move(other.entries_))
+        , written_count_(other.written_count_)
+        , guards_(std::move(other.guards_))
+    {
+        // Leave other in a defined state: empty entries, no pointers to free.
+        other.written_count_ = 0;
+    }
 
     InvertedIndexBuilder& operator= ( InvertedIndexBuilder const& ) = delete;
-    InvertedIndexBuilder& operator= ( InvertedIndexBuilder&& )      = default;
 
-    ~InvertedIndexBuilder() = default;
+    InvertedIndexBuilder& operator= ( InvertedIndexBuilder&& other ) noexcept
+    {
+        if( this != &other ) {
+            // Free raw pointers for our own active entries before overwriting.
+            for( std::size_t i = written_count_; i < entries_.size(); ++i ) {
+                delete[] entries_[i].active.compressed_positions;
+            }
+            cfg_               = std::move(other.cfg_);
+            pending_positions_ = std::move(other.pending_positions_);
+            entries_           = std::move(other.entries_);
+            guards_            = std::move(other.guards_);
+            written_count_     = other.written_count_;
+            other.written_count_ = 0;
+        }
+        return *this;
+    }
+
+    ~InvertedIndexBuilder()
+    {
+        // Entries [0, written_count_) are in written state: their raw pointers have already
+        // been freed by write(). Only free the remaining active entries.
+        // Under normal operation, written_count_ should be zero until write() and then jump to
+        // entries_.size() at the end of write(), so this loop should usually run either zero
+        // times or all times. Other states only happen in case of an exception during write().
+        for( std::size_t i = written_count_; i < entries_.size(); ++i ) {
+            delete[] entries_[i].active.compressed_positions;
+        }
+    }
 
     // -------------------------------------------------------------------------
     //     Modifiers
@@ -245,16 +280,16 @@ public:
         // to write to the same indices very often.
         position_type* const pending = pending_begin_(index);
         if(
-            entry.pending_count > 0 &&
-            pending[static_cast<std::size_t>(entry.pending_count) - 1] == position
+            entry.active.pending_count > 0 &&
+            pending[static_cast<std::size_t>(entry.active.pending_count) - 1] == position
         ) {
             return;
         }
 
         // If there is still room in the pending buffer, just append.
-        if( entry.pending_count < static_cast<pending_count_type>(cfg_.pending_capacity) ) {
-            pending[entry.pending_count] = position;
-            ++entry.pending_count;
+        if( entry.active.pending_count < static_cast<pending_count_type>(cfg_.pending_capacity) ) {
+            pending[entry.active.pending_count] = position;
+            ++entry.active.pending_count;
             return;
         }
 
@@ -273,7 +308,7 @@ public:
     {
         for( std::size_t i = 0; i < entries_.size(); ++i ) {
             // auto lock = guards_.get_lock_guard(i);
-            if( !is_capped_(entries_[i]) && entries_[i].pending_count > 0 ) {
+            if( !is_capped_(entries_[i]) && entries_[i].active.pending_count > 0 ) {
                 flush_pending_locked_(i);
             }
         }
@@ -306,6 +341,19 @@ public:
      */
     InvertedIndexStats write( std::string const& path )
     {
+        // Memory layout during write():
+        //   - Each Entry slot is a union of an active posting-list state (raw pointer + counters)
+        //     and a written state (byte offset + count). Once write() processes an entry, it frees
+        //     the raw pointer and repurposes the same 16-byte slot to hold the (offset, count) pair
+        //     for the offset table. This avoids the auxiliary offsets and post_counts vectors that
+        //     would otherwise increase the peak memory usage.
+        //   - written_count_ tracks how many leading entries are in the written state at any
+        //     moment. The destructor uses this to free raw pointers only for entries still active,
+        //     which gives correct cleanup on exception without any try/catch in write().
+        //     In normal operation, written_count_ should be zero until write() and then jump to
+        //     entries_.size() at the end of write().
+        assert( written_count_ == 0 );
+
         // Get a binary output FILE* with safety checks and RAII management.
         auto fp_guard = genesis::util::io::file_output_file(path);
         FILE* const fp = fp_guard.get();
@@ -329,68 +377,63 @@ public:
             ++stats.posting_count_histogram[val];
         };
 
-        // Per-entry data accumulated during the blob write pass.
-        // Not reserving, to avoid memory overhead until needed. We might have many terms,
-        // which will be freed during the loop below, so the vectors will re-use their memory.
-        std::vector<std::uint64_t> offsets;     // byte offset of each entry's blob
-        std::vector<std::uint64_t> post_counts; // posting count (or capped sentinel or 0)
-        // offsets.reserve( entries_.size() );
-        // post_counts.reserve( entries_.size() );
-
         // Reusable encode buffer (heap-allocated, grown as needed).
         std::vector<std::uint8_t> encode_buf;
 
-        // Main blob write loop
+        // Track the maximum post count seen (needed for width_b when there is no cap).
+        std::uint64_t max_post_count = 0;
+
+        // Main blob write loop.
+        // As each entry is processed, its raw pointer is freed and the slot is repurposed
+        // in-place to hold the (offset, count) pair. written_count_ is updated immediately
+        // so the destructor can free remaining active pointers on any exception path.
         std::uint64_t current_offset = 0;
         for( std::size_t i = 0; i < entries_.size(); ++i ) {
             Entry& entry = entries_[i];
-            offsets.push_back( current_offset );
+            std::uint64_t const entry_offset = current_offset;
+            std::uint64_t post_count = 0;
 
-            // Capped entries do not have a blob, but store their post count.
+            // Capped entries do not have a blob; their pointer is already null from cap_entry_.
             if( is_capped_(entry) ) {
-                post_counts.push_back( static_cast<std::uint64_t>(capped_sentinel()) );
-                hist_inc( static_cast<std::uint64_t>(capped_sentinel()) );
-                reset_entry_(entry);
-                continue;
+                post_count = static_cast<std::uint64_t>(capped_sentinel());
+            } else {
+                // Decode existing + merge pending into thread_local buffer.
+                auto const& buf = flush_to_buffer_(i, nullptr);
+                std::size_t const count = buf.size();
+
+                if( count == 0 ) {
+                    // Empty entry: nothing to write, post_count stays 0.
+                } else if(
+                    cfg_.max_postings_per_term != 0 &&
+                    count > static_cast<std::size_t>(cfg_.max_postings_per_term)
+                ) {
+                    // Pending data pushed an uncapped entry over the cap threshold.
+                    post_count = static_cast<std::uint64_t>(capped_sentinel());
+                } else {
+                    // Regular entry with data: encode and write.
+                    std::size_t const bound = pfor_bound<position_type>(count);
+                    encode_buf.resize(bound);
+                    std::size_t const bytes_written = pfor_encode_delta1<position_type>(
+                        buf.data(), count, encode_buf.data()
+                    );
+                    checked_fwrite( encode_buf.data(), bytes_written );
+                    stats.total_blob_bytes += bytes_written;
+                    current_offset += bytes_written;
+                    post_count = static_cast<std::uint64_t>(count);
+                }
+
+                // Free the raw pointer for this entry's active state.
+                delete[] entry.active.compressed_positions;
             }
 
-            // Decode existing + merge pending into thread_local buffer.
-            auto const& buf = flush_to_buffer_(i, nullptr);
-            std::size_t const count = buf.size();
+            hist_inc( post_count );
+            max_post_count = std::max( max_post_count, post_count );
 
-            // Empty entries store zero in the offset table for clarity.
-            if( count == 0 ) {
-                post_counts.push_back( 0 );
-                hist_inc( 0 );
-                reset_entry_(entry);
-                continue;
-            }
-
-            // Pending data may push a previously-uncapped entry over the cap threshold.
-            if(
-                cfg_.max_postings_per_term != 0 &&
-                count > static_cast<std::size_t>(cfg_.max_postings_per_term)
-            ) {
-                post_counts.push_back( static_cast<std::uint64_t>(capped_sentinel()) );
-                hist_inc( static_cast<std::uint64_t>(capped_sentinel()) );
-                reset_entry_(entry);
-                continue;
-            }
-
-            // Regular entry with some data. Encode and write.
-            std::size_t const bound = pfor_bound<position_type>(count);
-            encode_buf.resize(bound);
-            std::size_t const bytes_written = pfor_encode_delta1<position_type>(
-                buf.data(), count, encode_buf.data()
-            );
-            checked_fwrite( encode_buf.data(), bytes_written );
-
-            // Update stats and free compressed memory.
-            post_counts.push_back( static_cast<std::uint64_t>(count) );
-            hist_inc( static_cast<std::uint64_t>(count) );
-            reset_entry_(entry);
-            stats.total_blob_bytes += bytes_written;
-            current_offset += bytes_written;
+            // Repurpose the slot in-place: raw pointer is gone, store (offset, count) here.
+            // Update written_count_ before the next iteration so the destructor sees
+            // a consistent boundary between written and active entries at all times.
+            entry.written = { entry_offset, post_count };
+            written_count_ = i + 1;
         }
 
         // Offset table.
@@ -402,9 +445,7 @@ public:
         std::size_t const width_a = needed_bits( current_offset );
         std::size_t const width_b = ( cfg_.max_postings_per_term != 0 )
             ? needed_bits( static_cast<std::uint64_t>(capped_sentinel()))
-            : needed_bits( post_counts.empty()
-                ? 0u
-                : *std::max_element( post_counts.begin(), post_counts.end() ))
+            : needed_bits( max_post_count )
         ;
         if( width_a + width_b > 64 ) {
             throw std::overflow_error(
@@ -413,21 +454,20 @@ public:
             );
         }
 
-        // Contruct the offset table. We have freed all compressed blobs at this point,
-        // so we can use the memory for the offset table storage without too much worry.
+        // Construct the offset table directly from the repurposed entry slots.
         using BPV = genesis::util::container::BitpackedPairVector<
             std::uint64_t, std::uint64_t, std::uint64_t
         >;
         BPV offset_table( entries_.size(), width_a, width_b );
         for( std::size_t i = 0; i < entries_.size(); ++i ) {
-            offset_table.set_unchecked( i, offsets[i], post_counts[i] );
+            offset_table.set_unchecked( i, entries_[i].written.offset, entries_[i].written.count );
         }
 
-        // Compute offset table byte size: 2-word header + raw storage words.
+        // Compute offset table byte size: 3-word header + raw storage words.
         std::size_t const num_storage_words = offset_table.storage().data().size();
         std::uint64_t const offset_table_offset = current_offset;
         std::uint64_t const offset_table_bytes  =
-            2 * sizeof(std::uint64_t) +                   // header: width_a, width_b
+            3 * sizeof(std::uint64_t) +                   // header: size, width_a, width_b
             num_storage_words * sizeof(BPV::storage_type) // raw bitpacked storage
         ;
 
@@ -449,6 +489,12 @@ public:
             static_cast<std::uint64_t>(sizeof(position_type) * 8)
         };
         checked_fwrite( &footer, sizeof(footer) );
+
+        // Reset all entries to active-empty state, restoring the builder for reuse.
+        for( std::size_t i = 0; i < entries_.size(); ++i ) {
+            entries_[i].active = { nullptr, 0, 0, 0 };
+        }
+        written_count_ = 0;
 
         return stats;
     }
@@ -503,7 +549,7 @@ public:
         if( is_capped_(entry) ) {
             return capped_sentinel();
         }
-        return static_cast<std::size_t>(entry.compressed_count);
+        return static_cast<std::size_t>(entry.active.compressed_count);
     }
 
     /**
@@ -530,17 +576,17 @@ public:
 
         // Check if the term is capped or has no data.
         Entry const& entry = entries_[index];
-        if( is_capped_(entry) || entry.compressed_count == 0 ) {
+        if( is_capped_(entry) || entry.active.compressed_count == 0 ) {
             target_buf.clear();
             return;
         }
 
         // Decode the compressed postings into buf.
         // Auto-switch between 32 and 64 bit PFOR based on the position_type.
-        target_buf.resize( static_cast<std::size_t>( entry.compressed_count ));
+        target_buf.resize( static_cast<std::size_t>( entry.active.compressed_count ));
         pfor_decode_delta1<position_type>(
-            entry.compressed_positions.get(),
-            static_cast<std::size_t>(entry.compressed_count),
+            entry.active.compressed_positions,
+            static_cast<std::size_t>(entry.active.compressed_count),
             target_buf.data()
         );
     }
@@ -551,24 +597,44 @@ public:
 
 private:
 
-    struct Entry
+    // Each entry slot is a union of two states:
+    //   active:  the normal build state — a raw pointer to PFOR-compressed data plus counters.
+    //   written: set by write() once an entry is processed — the byte offset and post count
+    //            for the offset table, stored in the same 16 bytes without extra allocation.
+    //
+    // written_count_ is the boundary: entries [0, written_count_) are in written state,
+    // entries [written_count_, entries_.size()) are in active state. The destructor and
+    // move operators use this to free only the active entries' raw pointers.
+    union Entry
     {
-        // Compressed postings for the term index, stored as a byte array from PFor.
-        std::unique_ptr<std::uint8_t[]> compressed_positions;
+        struct Active
+        {
+            // Raw pointer to PFOR-compressed posting data. Owned by InvertedIndexBuilder;
+            // freed explicitly in cap_entry_, reset_entry_, write(), and the destructor.
+            std::uint8_t* compressed_positions;
 
-        // Number of compressed postings in the compressed_positions array.
-        stored_count_type compressed_count = 0;
+            // Number of compressed postings in compressed_positions.
+            stored_count_type compressed_count;
 
-        // Number of pending positions currently in the pending buffer for this term index.
-        pending_count_type pending_count = 0;
+            // Number of pending positions currently in the pending buffer for this term index.
+            pending_count_type pending_count;
 
-        // We make compressed_positions grow geometrically, to avoid allocating new memory on every
-        // flush. This allows to store its size as an power-of-two exponent of allocated capacity:
-        // capacity = 1 << compressed_exponent. Meaningful only when compressed_positions != nullptr.
-        // Using uint8_t here also keeps Entry at 16 bytes (with padding due to the pointer
-        // alignment needed) for a wider range of template combinations, and normalises
-        // allocation sizes to powers of two for better allocator bin reuse across terms.
-        std::uint8_t compressed_exponent = 0;
+            // compressed_positions grows geometrically; capacity = 1 << compressed_exponent.
+            // Meaningful only when compressed_positions != nullptr.
+            // Using uint8_t here also keeps Entry at 16 bytes (with padding due to the pointer
+            // alignment needed) for a wider range of template combinations, and normalises
+            // allocation sizes to powers of two for better allocator bin reuse across terms.
+            std::uint8_t compressed_exponent;
+        } active;
+
+        struct Written
+        {
+            std::uint64_t offset; // byte offset of this entry's blob in the output file
+            std::uint64_t count;  // posting count, or capped sentinel, or 0 for empty
+        } written;
+
+        Entry() : active{ nullptr, 0, 0, 0 } {}
+        ~Entry() {} // InvertedIndexBuilder owns the raw pointer lifecycle
     };
 
     [[nodiscard]] static std::size_t get_pending_storage_size_(
@@ -607,24 +673,23 @@ private:
     {
         return
             cfg_.max_postings_per_term != 0 &&
-            entry.compressed_count == capped_sentinel()
+            entry.active.compressed_count == capped_sentinel()
         ;
     }
 
     void cap_entry_(Entry& entry) noexcept
     {
-        entry.compressed_positions.reset();
-        entry.compressed_exponent = 0;
-        entry.compressed_count = capped_sentinel();
-        entry.pending_count = 0;
+        delete[] entry.active.compressed_positions;
+        entry.active.compressed_positions = nullptr;
+        entry.active.compressed_exponent  = 0;
+        entry.active.compressed_count     = capped_sentinel();
+        entry.active.pending_count        = 0;
     }
 
     void reset_entry_(Entry& entry) noexcept
     {
-        entry.compressed_positions.reset();
-        entry.compressed_exponent = 0;
-        entry.compressed_count = 0;
-        entry.pending_count = 0;
+        delete[] entry.active.compressed_positions;
+        entry.active = { nullptr, 0, 0, 0 };
     }
 
     /**
@@ -648,7 +713,7 @@ private:
         assert(!is_capped_(entry));
 
         // Nothing to do.
-        if( entry.pending_count == 0 && extra_position == nullptr ) {
+        if( entry.active.pending_count == 0 && extra_position == nullptr ) {
             return;
         }
 
@@ -681,8 +746,8 @@ private:
 
         // Check if new allocation is needed or current size of compressed_positions is sufficient.
         if(
-            !entry.compressed_positions ||
-            bytes_written > (std::size_t{1} << entry.compressed_exponent)
+            !entry.active.compressed_positions ||
+            bytes_written > (std::size_t{1} << entry.active.compressed_exponent)
         ) {
             // Round up to the next power of two: exponent = ceil(log2(bytes_written)).
             std::size_t const new_exp = std::bit_width( bytes_written - 1 );
@@ -690,15 +755,14 @@ private:
                 // That is large... still checking.
                 throw std::overflow_error("compressed_exponent exceeds uint8_t");
             }
-            entry.compressed_positions = std::make_unique<std::uint8_t[]>(
-                std::size_t{1} << new_exp
-            );
-            entry.compressed_exponent = static_cast<std::uint8_t>( new_exp );
+            delete[] entry.active.compressed_positions;
+            entry.active.compressed_positions = new std::uint8_t[std::size_t{1} << new_exp];
+            entry.active.compressed_exponent  = static_cast<std::uint8_t>( new_exp );
         }
 
         // Store the compressed data and count in the entry.
-        std::memcpy( entry.compressed_positions.get(), encode_buf.data(), bytes_written );
-        entry.compressed_count = static_cast<stored_count_type>(count);
+        std::memcpy( entry.active.compressed_positions, encode_buf.data(), bytes_written );
+        entry.active.compressed_count = static_cast<stored_count_type>(count);
     }
 
     /**
@@ -717,12 +781,12 @@ private:
     ) {
         Entry& entry = entries_[index];
         assert( !is_capped_(entry) );
-        assert( entry.pending_count <= static_cast<pending_count_type>(cfg_.pending_capacity) );
-        assert( entry.compressed_count == 0 || entry.compressed_positions != nullptr );
+        assert( entry.active.pending_count <= static_cast<pending_count_type>(cfg_.pending_capacity) );
+        assert( entry.active.compressed_count == 0 || entry.active.compressed_positions != nullptr );
 
         // Get all involved counts of entries.
-        std::size_t const existing_count = static_cast<std::size_t>(entry.compressed_count);
-        std::size_t const pending_count  = static_cast<std::size_t>(entry.pending_count);
+        std::size_t const existing_count = static_cast<std::size_t>(entry.active.compressed_count);
+        std::size_t const pending_count  = static_cast<std::size_t>(entry.active.pending_count);
         std::size_t const extra_count    = extra_position ? 1u : 0u;
         std::size_t const total_count    = existing_count + pending_count + extra_count;
 
@@ -734,7 +798,7 @@ private:
         // Decode old compressed postings into the front.
         if( existing_count > 0 ) {
             (void) pfor_decode_delta1<position_type>(
-                entry.compressed_positions.get(),
+                entry.active.compressed_positions,
                 existing_count,
                 buffer.data()
             );
@@ -757,7 +821,7 @@ private:
         }
 
         // Pending data is now consumed.
-        entry.pending_count = 0;
+        entry.active.pending_count = 0;
 
         // Sort only the newly appended tail; the existing head is already sorted.
         auto const middle = buffer.begin() + static_cast<std::ptrdiff_t>(existing_count);
@@ -778,13 +842,21 @@ private:
 
     Config cfg_;
 
-    // Term index of compressed postings
-    std::vector<Entry> entries_;
-
     // Contiguous storage for all pending buffers,
     // indexed by [term_index * pending_capacity + offset].
     std::vector<position_type> pending_positions_;
 
+    // Term index of compressed postings. Each slot is a union of an active entry
+    // (raw pointer + counters) and a written entry (offset + count); see Entry above.
+    std::vector<Entry> entries_;
+
+    // Number of leading entries already converted to written state by write().
+    // Entries [0, written_count_) hold (offset, count) pairs; their raw pointers are freed.
+    // Entries [written_count_, entries_.size()) are in active state and may have raw pointers.
+    // The destructor and move operators use this boundary for correct pointer cleanup.
+    std::size_t written_count_ = 0;
+
+    // Thread-safe access for concurrent insertion into entries.
     mutable genesis::util::threading::ConcurrentVectorGuard guards_;
 };
 
