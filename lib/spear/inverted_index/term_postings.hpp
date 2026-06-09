@@ -40,6 +40,7 @@
 #include <cstdint>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace spear::inverted_index {
@@ -113,7 +114,9 @@ public:
      */
     explicit TermPostings( std::size_t max_terms )
         : lists_( max_terms )
-    {}
+    {
+        deferred_.reserve( max_terms );
+    }
 
     // -------------------------------------------------------------------------
     //     Accumulation interface
@@ -121,9 +124,18 @@ public:
 
     /**
      * @brief Reset for a new query round, keeping buffer allocations intact.
+     *
+     * Throws std::runtime_error if add_deferred() was called but flush_deferred() was not,
+     * since that indicates deferred terms would be silently lost.
      */
     void clear()
     {
+        if( !deferred_.empty() ) {
+            throw std::runtime_error(
+                "TermPostings::clear: " + std::to_string( deferred_.size() ) +
+                " deferred term(s) were never flushed; call flush_deferred() first"
+            );
+        }
         for( std::size_t i = 0; i < count_; ++i ) {
             lists_[i].clear();
         }
@@ -221,6 +233,74 @@ public:
     }
 
     // -------------------------------------------------------------------------
+    //     Deferred (Prefetch-Pipelined) Accumulation
+    // -------------------------------------------------------------------------
+
+    /**
+     * @brief Enqueue @p term_idx for later decoding and prefetch its offset-table entry.
+     *
+     * Stores the term index in an internal buffer and fires a non-blocking prefetch hint
+     * for the offset-table entry so it arrives in L2 cache before flush_deferred() runs.
+     * Combine with flush_deferred() for a prefetch-pipelined two-phase decode:
+     *
+     * @code
+     *   tp.clear();
+     *   for( auto term : query_terms ) {
+     *       tp.add_deferred( index, term );   // called e.g. during k-mer extraction
+     *   }
+     *   tp.flush_deferred( index );           // blob prefetch + decode in one pipelined pass
+     * @endcode
+     *
+     * May be freely mixed with direct add() calls in the same query round.
+     */
+    void add_deferred(
+        InvertedIndex<PositionT> const& index,
+        term_index_type                 term_idx
+    ) {
+        deferred_.push_back( term_idx );
+        index.prefetch_offset( term_idx );
+    }
+
+    /**
+     * @brief Decode all terms enqueued via add_deferred(), using a prefetch-pipelined loop.
+     *
+     * Runs two interleaved passes over the deferred term list:
+     *   - A priming loop fires blob prefetches for the first @p prefetch_distance terms.
+     *   - A combined loop decodes term[i] while prefetching the blob for term[i + prefetch_distance].
+     *
+     * At steady state, exactly @p prefetch_distance blob-start prefetches are in flight,
+     * staying within hardware line-fill buffer capacity.  Each blob prefetch covers 256 bytes
+     * (four cache lines), which handles most short posting lists outright and primes the
+     * hardware sequential prefetcher for longer ones.
+     *
+     * Clears the deferred queue on completion.  @p prefetch_distance = 8 is a good default
+     * for typical DRAM latency (~150 ns) and short posting list decode times (~10–30 ns each);
+     * tune upward if lists are longer and decode is slower.
+     */
+    void flush_deferred(
+        InvertedIndex<PositionT> const& index,
+        std::size_t                     prefetch_distance = 8
+    ) {
+        auto const n     = deferred_.size();
+        auto const prime = std::min( prefetch_distance, n );
+
+        // Prime: fire blob prefetches for the first prefetch_distance terms
+        for( std::size_t i = 0; i < prime; ++i ) {
+            index.prefetch_blob( deferred_[i] );
+        }
+
+        // Pipelined loop: decode term[i], prefetch blob for term[i + prefetch_distance]
+        for( std::size_t i = 0; i < n; ++i ) {
+            if( i + prefetch_distance < n ) {
+                index.prefetch_blob( deferred_[i + prefetch_distance] );
+            }
+            add( index, deferred_[i] );
+        }
+
+        deferred_.clear();
+    }
+
+    // -------------------------------------------------------------------------
     //     Accessors
     // -------------------------------------------------------------------------
 
@@ -256,6 +336,7 @@ public:
 private:
 
     std::vector<std::vector<PositionT>> lists_;
+    std::vector<term_index_type>        deferred_;
     std::size_t                         count_ = 0;
     Stats                               hist_  = {};
 };

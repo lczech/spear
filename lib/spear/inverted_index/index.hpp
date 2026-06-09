@@ -398,6 +398,51 @@ public:
     }
 
     // -------------------------------------------------------------------------
+    //     Prefetch Hints
+    // -------------------------------------------------------------------------
+
+    /**
+     * @brief Prefetch the offset-table entry for @p term_index into L2 cache.
+     *
+     * Call this in a tight loop over all query term indices before calling postings()
+     * or add_deferred() / flush_deferred() on a TermPostings collection.  By the time
+     * the subsequent decode loop starts, the offset-table words should be in cache.
+     *
+     * No-op on non-GCC/Clang compilers.  Asserts that @p term_index is in range.
+     */
+    void prefetch_offset( term_index_type term_index ) const noexcept
+    {
+        assert( term_index < static_cast<term_index_type>( footer_.num_terms ));
+        offset_table_.prefetch( term_index );
+    }
+
+    /**
+     * @brief Prefetch the first 256 bytes of the posting-list blob for @p term_index.
+     *
+     * Reads the blob byte-offset from the (hopefully already cached) offset-table entry
+     * and issues four sequential cache-line prefetch hints.  Covers short posting lists
+     * outright; for longer ones the hardware sequential prefetcher takes over after the
+     * first few cache lines establish a stride.
+     *
+     * No-op in kPread mode (blob not in RAM) and on non-GCC/Clang compilers.
+     * Asserts that @p term_index is in range.
+     */
+    void prefetch_blob( term_index_type term_index ) const noexcept
+    {
+        assert( term_index < static_cast<term_index_type>( footer_.num_terms ));
+        if( blob_.empty() ) {
+            return;
+        }
+        auto const base = blob_.data() + offset_table_.first_unchecked( term_index );
+        #if defined(__GNUC__) || defined(__clang__)
+            __builtin_prefetch( base,       0, 0 );
+            __builtin_prefetch( base + 64,  0, 0 );
+            __builtin_prefetch( base + 128, 0, 0 );
+            __builtin_prefetch( base + 192, 0, 0 );
+        #endif
+    }
+
+    // -------------------------------------------------------------------------
     //     Index Metadata
     // -------------------------------------------------------------------------
 
