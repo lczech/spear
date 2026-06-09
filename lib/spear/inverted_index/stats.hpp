@@ -65,22 +65,45 @@ struct InvertedIndexStats
 /**
  * @brief Accumulated statistics across one or more HitCollector::query() calls.
  *
- * Histograms grow on demand to fit the largest observed value; iterate up to `.size()`
+ * All histograms grow on demand to fit the largest observed value; iterate up to `.size()`
  * to print or process them without needing to know the maximum in advance.
+ *
+ * Per-interval histograms (one entry per interval across all queries):
  *
  *   interval_length_histogram[n]  : number of intervals with v_right - v_left == n
  *   peak_count_histogram[n]       : number of intervals whose peak distinct-list count == n
  *
- * total_intervals counts every interval emitted across all accumulated queries.
- * total_queries counts the number of times accumulate() has been called, allowing
- * per-query averages to be derived.
+ * Per-query histograms (one entry per accumulate() call, e.g. per read):
+ *
+ *   max_peak_histogram[n]              : number of queries whose best interval had peak_count == n;
+ *                                        n == 0 means the query returned no intervals at all
+ *                                        (the read produced no hit above the M threshold)
+ *   intervals_per_query_histogram[n]   : number of queries that returned exactly n intervals;
+ *                                        n == 0 counts unmapped reads directly
+ *   total_evidence_histogram[n]        : number of queries whose sum of peak_counts across all
+ *                                        intervals equals n; distinguishes a read with one strong
+ *                                        hit (low sum, high max_peak) from one with many weak hits
+ *                                        (high sum, low max_peak) typical of repetitive regions
+ *
+ * Scalar counters:
+ *
+ *   total_intervals  : total intervals emitted across all queries
+ *   total_queries    : number of times accumulate() was called (i.e. number of reads queried)
  */
 struct HitCollectorStats
 {
+    // Per-interval
     std::vector<std::uint64_t> interval_length_histogram;
     std::vector<std::uint64_t> peak_count_histogram;
-    std::uint64_t              total_intervals = 0;
-    std::uint64_t              total_queries   = 0;
+
+    // Per-query (per-read)
+    std::vector<std::uint64_t> max_peak_histogram;
+    std::vector<std::uint64_t> intervals_per_query_histogram;
+    std::vector<std::uint64_t> total_evidence_histogram;
+
+    // Scalar totals
+    std::uint64_t total_intervals = 0;
+    std::uint64_t total_queries   = 0;
 };
 
 // =================================================================================================
@@ -91,7 +114,11 @@ struct HitCollectorStats
  * @brief Add the results of one HitCollector::query() call to @p stats.
  *
  * Increments total_queries by one regardless of whether any intervals were found.
- * For each interval, increments total_intervals and extends and updates both histograms.
+ * Updates all four histograms and total_intervals.
+ *
+ * Per-interval: interval_length_histogram and peak_count_histogram are updated for every interval.
+ * Per-query: intervals_per_query_histogram is updated with the number of intervals returned;
+ * max_peak_histogram is updated with the highest peak_count seen (0 if no intervals).
  *
  * @p intervals is typically the output vector from HitCollector::query(); any type whose
  * elements expose `v_left`, `v_right`, and `peak_count` fields is accepted.
@@ -99,22 +126,36 @@ struct HitCollectorStats
 template<typename HitInterval>
 void accumulate( HitCollectorStats& stats, std::vector<HitInterval> const& intervals )
 {
+    // Helper: resize histogram on demand and increment the bucket at index.
+    auto tally = []( std::vector<std::uint64_t>& hist, std::size_t index )
+    {
+        if( index >= hist.size() ) {
+            hist.resize( index + 1, 0 );
+        }
+        ++hist[index];
+    };
+
+    // Totals.
     ++stats.total_queries;
+
+    // Per-interval pass; track per-query aggregates on the fly to avoid a second scan.
+    std::size_t max_peak       = 0;
+    std::size_t total_evidence = 0;
     for( auto const& iv : intervals ) {
-        ++stats.total_intervals;
-
-        auto const len = static_cast<std::size_t>( iv.v_right - iv.v_left );
-        if( len >= stats.interval_length_histogram.size() ) {
-            stats.interval_length_histogram.resize( len + 1, 0 );
-        }
-        ++stats.interval_length_histogram[len];
-
         auto const pc = static_cast<std::size_t>( iv.peak_count );
-        if( pc >= stats.peak_count_histogram.size() ) {
-            stats.peak_count_histogram.resize( pc + 1, 0 );
+        if( pc > max_peak ) {
+            max_peak = pc;
         }
-        ++stats.peak_count_histogram[pc];
+        total_evidence += pc;
+        tally( stats.interval_length_histogram, static_cast<std::size_t>( iv.v_right - iv.v_left ));
+        tally( stats.peak_count_histogram, pc );
+        ++stats.total_intervals;
     }
+
+    // Per-query summaries (all stay 0 when intervals is empty, which is correct)
+    tally( stats.max_peak_histogram,            max_peak          );
+    tally( stats.intervals_per_query_histogram, intervals.size()  );
+    tally( stats.total_evidence_histogram,      total_evidence    );
 }
 
 } // namespace spear::inverted_index
