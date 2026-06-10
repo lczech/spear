@@ -67,7 +67,7 @@ static constexpr std::uint64_t INVERTED_INDEX_VERSION = 1;
  * File layout (all multi-byte integers are native-endian):
  * @code
  *   [compressed posting blobs  — variable length, concatenated]
- *   [offset table header       — 2 × uint64: width_a, width_b]
+ *   [offset table header       — 3 × uint64: size, width_a, width_b]
  *   [offset table storage      — BitpackedPairVector raw words]
  *   [footer                    — sizeof(InvertedIndexFooter) bytes]
  * @endcode
@@ -101,9 +101,13 @@ struct InvertedIndexFooter
     /// Bit width of stored positions: either 32 or 64. Determines which PFor codec
     /// (pfor_decode_delta1<uint32_t> vs pfor_decode_delta1<uint64_t>) the reader must use.
     std::uint64_t position_bits;
+
+    /// Highest position value that was ever passed to InvertedIndexBuilder::add(),
+    /// regardless of whether it was ultimately stored (e.g., for capped terms).
+    std::uint64_t max_position;
 };
 
-static_assert( sizeof(InvertedIndexFooter) == 56, "InvertedIndexFooter must be exactly 56 bytes" );
+static_assert( sizeof(InvertedIndexFooter) == 64, "InvertedIndexFooter must be exactly 64 bytes" );
 
 } // namespace spear::inverted_index
 

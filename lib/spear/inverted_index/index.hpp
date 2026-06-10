@@ -476,6 +476,15 @@ public:
     }
 
     /**
+     * @brief Highest position value that was ever passed to InvertedIndexBuilder::add(),
+     * regardless of whether it was ultimately stored (e.g., for capped terms).
+     */
+    [[nodiscard]] std::uint64_t max_position() const noexcept
+    {
+        return footer_.max_position;
+    }
+
+    /**
      * @brief Return true if the index has been opened, i.e., if open() has been called.
      */
     [[nodiscard]] bool is_open() const noexcept

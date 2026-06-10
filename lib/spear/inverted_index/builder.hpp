@@ -212,6 +212,7 @@ public:
                 "(needs one extra value for capped sentinel)"
             );
         }
+        max_position_shards_.resize( guards_.bucket_count() );
     }
 
     InvertedIndexBuilder( InvertedIndexBuilder const& ) = delete;
@@ -222,6 +223,7 @@ public:
         , entries_(std::move(other.entries_))
         , written_count_(other.written_count_)
         , guards_(std::move(other.guards_))
+        , max_position_shards_(std::move(other.max_position_shards_))
     {
         // Leave other in a defined state: empty entries, no pointers to free.
         other.written_count_ = 0;
@@ -240,6 +242,7 @@ public:
             pending_positions_ = std::move(other.pending_positions_);
             entries_           = std::move(other.entries_);
             guards_            = std::move(other.guards_);
+            max_position_shards_ = std::move(other.max_position_shards_);
             written_count_     = other.written_count_;
             other.written_count_ = 0;
         }
@@ -271,6 +274,15 @@ public:
         std::size_t const index = checked_index_(term_index);
         auto lock = guards_.get_lock_guard(index);
         Entry& entry = entries_[index];
+
+        // Track the highest position ever passed to add(), regardless of whether it ends up
+        // stored or discarded due to the entry being capped. The bucket lock we just acquired
+        // already covers this shard, so a plain (non-atomic) update is safe here.
+        position_type& shard_max = max_position_shards_[index % guards_.bucket_count()].value;
+        if( position > shard_max ) {
+            shard_max = position;
+        }
+
         if( is_capped_(entry) ) {
             return;
         }
@@ -327,11 +339,12 @@ public:
      *   [compressed posting blobs  — variable, concatenated]
      *   [offset table header       — 2 × uint64: width_a, width_b]
      *   [offset table storage      — BitpackedPairVector raw words]
-     *   [footer                    — 6 × uint64 = 48 bytes]
+     *   [footer                    — 8 × uint64 = 64 bytes]
      * @endcode
      *
      * The footer is an InvertedIndexFooter (see format.hpp): magic, version, num_terms,
-     * offset_table_offset, offset_table_bytes, max_postings_per_term, position_bits.
+     * offset_table_offset, offset_table_bytes, max_postings_per_term, position_bits,
+     * max_position.
      * The offset table stores (byte_offset, count) pairs indexed by term index.
      * For capped terms, count == max_postings_per_term + 1; for empty terms, count == 0.
      *
@@ -627,7 +640,8 @@ private:
             offset_table_offset,
             offset_table_bytes,
             static_cast<std::uint64_t>(cfg_.max_postings_per_term),
-            static_cast<std::uint64_t>(sizeof(position_type) * 8)
+            static_cast<std::uint64_t>(sizeof(position_type) * 8),
+            static_cast<std::uint64_t>(max_position_())
         };
         checked_fwrite( &footer, sizeof(footer) );
 
@@ -636,6 +650,9 @@ private:
             entries_[i].active = { nullptr, 0, 0, 0 };
         }
         written_count_ = 0;
+        for( auto& shard : max_position_shards_ ) {
+            shard.value = 0;
+        }
 
         return stats;
     }
@@ -847,6 +864,29 @@ private:
     }
 
     // -------------------------------------------------------------------------
+    //     Max Position Tracking
+    // -------------------------------------------------------------------------
+
+    // Assumed cache line size, used to pad max_position_shards_ entries so that
+    // concurrent updates to different shards do not cause false sharing.
+    static constexpr std::size_t CACHE_LINE_BYTES = 64;
+
+    struct alignas(CACHE_LINE_BYTES) MaxPositionShard
+    {
+        position_type value = 0;
+    };
+
+    // Reduce the per-bucket shards down to the overall maximum position ever inserted.
+    [[nodiscard]] position_type max_position_() const noexcept
+    {
+        position_type result = 0;
+        for( auto const& shard : max_position_shards_ ) {
+            result = std::max( result, shard.value );
+        }
+        return result;
+    }
+
+    // -------------------------------------------------------------------------
     //     Bin Table for Compressed Buffer Sizes
     // -------------------------------------------------------------------------
 
@@ -916,6 +956,12 @@ private:
 
     // Thread-safe access for concurrent insertion into entries.
     mutable genesis::util::threading::ConcurrentVectorGuard guards_;
+
+    // Per-bucket running maximum of all positions ever passed to add(), one slot per
+    // ConcurrentVectorGuard bucket. Updated under the same per-bucket lock that add()
+    // already holds, so no extra synchronization is needed. Cache-line padded, since
+    // positions tend to arrive in increasing order, making updates frequent.
+    std::vector<MaxPositionShard> max_position_shards_;
 };
 
 } // namespace spear::inverted_index
