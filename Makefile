@@ -23,12 +23,21 @@
 #     This makefile wraps around CMake in order to make the use straight forward.
 #     A simple call to "make" suffices to build the whole of SPEAR.
 #
+#     Build type is controlled by which target you call first (or explicitly):
+#       make          — RELEASE by default on a fresh build; preserves existing config otherwise
+#       make release  — (re)configure as RELEASE, then compile
+#       make debug    — (re)configure as DEBUG (assertions, debug symbols), then compile
+#
 #     This script is mainly intended for fast development, as it 'misuses' CMake
 #     directly as a build system instead of a build system _generator_.
 # --------------------------------------------------------------------------------------------------
 
-# Run everything by specifying the CMake file and the build command as dependencies.
-all: build/CMakeCache.txt build
+# Run CMake if not yet done or if CMakeLists.txt has changed, then compile.
+# Does not pass -DCMAKE_BUILD_TYPE so that an existing cache is not overridden;
+# on a fresh build CMakeLists.txt defaults to RELEASE when the variable is unset.
+all: build/CMakeCache.txt
+	@echo "Running make..."
+	$(MAKE) -s -C build
 	@echo "Done."
 .PHONY: all
 
@@ -38,11 +47,25 @@ build/CMakeCache.txt: CMakeLists.txt
 	@mkdir -p build
 	@cd build && cmake ..
 
-# Run make. State CMake as dependency, to ensure correct order.
-build: build/CMakeCache.txt
+# Explicitly (re)configure as RELEASE and compile.
+release:
+	@echo "Running CMake (release)..."
+	@mkdir -p build
+	@cd build && cmake .. -DCMAKE_BUILD_TYPE=RELEASE
 	@echo "Running make..."
 	$(MAKE) -s -C build
-.PHONY: build
+	@echo "Done."
+.PHONY: release
+
+# Explicitly (re)configure as DEBUG (assertions, debug symbols) and compile.
+debug:
+	@echo "Running CMake (debug)..."
+	@mkdir -p build
+	@cd build && cmake .. -DCMAKE_BUILD_TYPE=DEBUG
+	@echo "Running make..."
+	$(MAKE) -s -C build
+	@echo "Done."
+.PHONY: debug
 
 # Special make that also includes new files.
 # We first touch all inner CMake files so that their glob search for files is rerun.
