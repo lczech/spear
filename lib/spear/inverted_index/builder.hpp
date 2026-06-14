@@ -103,7 +103,7 @@ namespace spear::inverted_index {
  *     Integer type used for the per-entry stored-posting counter. This counts
  *     the number of integers currently present in the compressed posting list.
  *     It also stores the capped sentinel value max_postings_per_term + 1.
- *     Default: uint16_t. That is, no more than 2^16 stored postings per term index.
+ *     Default: uint32_t. That is, no more than 2^32 stored postings per term index.
  *
  * @tparam PendingCountT
  *     Integer type used for the size of the pending buffer for one entry.
@@ -112,7 +112,7 @@ namespace spear::inverted_index {
  */
 template<
     typename PositionT     = std::uint64_t,
-    typename StoredCountT  = std::uint16_t,
+    typename StoredCountT  = std::uint32_t,
     typename PendingCountT = std::uint8_t
 >
 class InvertedIndexBuilder

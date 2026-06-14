@@ -177,8 +177,8 @@ std::function<void()> spear_cli_callback(
     check_citations( citations );
 
     // If the genesis/spear citation is not present, add it to the front!
-    if( ! genesis::util::core::contains( citations, "Czech2023-spear" )) {
-        citations.insert( citations.begin(), "Czech2023-spear" );
+    if( ! genesis::util::core::contains( citations, "Czech2026-spear" )) {
+        citations.insert( citations.begin(), "Czech2026-spear" );
     }
 
     // Add the citations to the list, so that they can be used by the wiki command

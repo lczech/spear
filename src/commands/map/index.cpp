@@ -1,0 +1,361 @@
+/*
+    SPEAR - Sorting Petabytes of Environmental and Ancient Reads
+    Copyright (C) 2026 Lucas Czech
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+    Contact:
+    Lucas Czech <lucas.czech@sund.ku.dk>
+    University of Copenhagen, Globe Institute, Section for GeoGenetics
+    Oster Voldgade 5-7, 1350 Copenhagen K, Denmark
+*/
+
+#include "commands/map/index.hpp"
+#include "options/global.hpp"
+#include "tools/cli_setup.hpp"
+
+#include "spear/inverted_index/builder.hpp"
+
+#include "genesis/sequence/format/fasta_reader.hpp"
+#include "genesis/sequence/format/fastx_input_stream.hpp"
+#include "genesis/sequence/kmer/canonical_encoding.hpp"
+#include "genesis/sequence/kmer/extractor.hpp"
+#include "genesis/sequence/kmer/function.hpp"
+#include "genesis/sequence/sequence.hpp"
+#include "genesis/util/core/fs.hpp"
+#include "genesis/util/core/info.hpp"
+#include "genesis/util/core/logging.hpp"
+#include "genesis/util/format/json/document.hpp"
+#include "genesis/util/format/json/writer.hpp"
+#include "genesis/util/io/input_source.hpp"
+#include "genesis/util/text/string.hpp"
+
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <utility>
+
+// =================================================================================================
+//      Setup
+// =================================================================================================
+
+void setup_map_index( CLI::App& app )
+{
+    // Create the options and subcommand objects.
+    auto options = std::make_shared<MapIndexOptions>();
+    auto sub = app.add_subcommand(
+        "index",
+        "Index a reference genome for mapping short reads to it."
+    );
+
+    // -------------------------------------------------------------------
+    //     Input
+    // -------------------------------------------------------------------
+
+    // Input fasta file.
+    options->opt_fasta = sub->add_option(
+        "--fasta",
+        options->opt_fasta.value,
+        "Input reference genome in fasta or fasta.gz format to build the index from."
+    );
+    options->opt_fasta.option->check( CLI::ExistingFile );
+    options->opt_fasta.option->required();
+    options->opt_fasta.option->group( "Input" );
+
+    // -------------------------------------------------------------------
+    //     Settings
+    // -------------------------------------------------------------------
+
+    // K-mer size.
+    options->opt_k = sub->add_option(
+        "--k",
+        options->opt_k.value,
+        "Size of the k-mers."
+    );
+    options->opt_k.option->check( CLI::Range( size_t{1}, size_t{31} ));
+    options->opt_k.option->group( "Settings" );
+
+    // Canonical k-mers.
+    options->opt_canonical = sub->add_flag(
+        "--canonical",
+        options->opt_canonical.value,
+        "Index canonical k-mers (the lexicographically/numerically smaller of a k-mer and its "
+        "reverse complement), halving the number of distinct terms. If not set, k-mers are "
+        "indexed as-is, and reverse-complement matches need to be found by separately querying "
+        "the reverse complement k-mers of a read against the index."
+    );
+    options->opt_canonical.option->group( "Settings" );
+
+    // Max occurrences per k-mer.
+    options->opt_max_occurrences_per_kmer = sub->add_option(
+        "--max-occurrences-per-kmer",
+        options->opt_max_occurrences_per_kmer.value,
+        "Maximum number of occurrences to keep per k-mer. If a k-mer occurs more often than this, "
+        "all its occurrences are discarded. The default value of 0 means no limit."
+    );
+    options->opt_max_occurrences_per_kmer.option->group( "Settings" );
+
+    // Genome bin width.
+    options->opt_genome_bin_width = sub->add_option(
+        "--genome-bin-width",
+        options->opt_genome_bin_width.value,
+        "Width of the bins (in bases) that genome positions are grouped into for the occurrences."
+    );
+    options->opt_genome_bin_width.option->check( CLI::PositiveNumber );
+    options->opt_genome_bin_width.option->group( "Settings" );
+
+    // -------------------------------------------------------------------
+    //     Performance
+    // -------------------------------------------------------------------
+
+    // Pending capacity.
+    options->opt_pending_capacity = sub->add_option(
+        "--pending-capacity",
+        options->opt_pending_capacity.value,
+        "Number of pending positions buffered per k-mer before they are flushed into the index. "
+        "Higher values increase memory usage but speed up indexing. "
+    );
+    options->opt_pending_capacity.option->check( CLI::NonNegativeNumber );
+    options->opt_pending_capacity.option->group( "Performance" );
+
+    // Position bits. Hidden, as this is a low-level detail that most users will not need.
+    options->opt_position_bits = sub->add_option(
+        "--position-bits",
+        options->opt_position_bits.value,
+        "Number of bits used to store genome bin positions in the index, either 32 or 64. "
+        "32 bits suffice for reference genomes of up to about 550 Gbp (with the default "
+        "genome bin width); use 64 only for substantially larger references."
+    );
+    options->opt_position_bits.option->check( CLI::IsMember( std::vector<size_t>{ 32, 64 } ));
+    options->opt_position_bits.option->group( "" );
+
+    // -------------------------------------------------------------------
+    //     Output
+    // -------------------------------------------------------------------
+
+    // Output options.
+    options->opt_output.set_group( "Output" );
+    options->opt_output.add_default_output_opts_to_app( sub );
+
+    // Set the run function as callback to be called when this subcommand is issued.
+    // Hand over the options by copy, so that their shared ptr stays alive in the lambda.
+    sub->callback( spear_cli_callback(
+        sub,
+        {
+            // Citation keys as needed
+        },
+        [ options ]() {
+            run_map_index( *options );
+        }
+    ));
+}
+
+// =================================================================================================
+//      Run
+// =================================================================================================
+
+namespace {
+
+// -------------------------------------------------------------------------------------------------
+//      run_map_index_impl
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * @brief Implementation of run_map_index(), templated on the position type used by the
+ * inverted index, so that we can offer both 32 and 64 bit positions.
+ */
+template<typename PositionT>
+void run_map_index_impl( MapIndexOptions const& options )
+{
+    using namespace genesis::sequence;
+    using namespace genesis::util;
+
+    // Check that none of our output files already exist, unless overwriting is allowed,
+    // before running any expensive computations.
+    options.opt_output.check_output_files_nonexistence(
+        std::string( "map-index" ), std::vector<std::string>{ "sidx", "json" }
+    );
+
+    // Prepare param shorthands.
+    auto const k = static_cast<uint8_t>( options.opt_k.value );
+    auto const w = options.opt_genome_bin_width.value;
+    auto const canonical = options.opt_canonical.value;
+
+    // Determine the number of distinct terms (k-mers) that we index.
+    std::size_t const num_term_indices = canonical
+        ? number_of_canonical_kmers( k )
+        : ( std::size_t{ 1 } << ( 2 * k ))
+    ;
+
+    // Set up the inverted index builder.
+    using Builder = spear::inverted_index::InvertedIndexBuilder<PositionT>;
+    typename Builder::Config builder_config;
+    builder_config.pending_capacity = options.opt_pending_capacity.value;
+    builder_config.max_postings_per_term = static_cast<typename Builder::stored_count_type>(
+        options.opt_max_occurrences_per_kmer.value
+    );
+    Builder builder( num_term_indices, builder_config );
+
+    // Set up the canonical encoder, if requested. We use an optional-like raw pointer here,
+    // as MinimalCanonicalEncoding has no default constructor.
+    std::unique_ptr<MinimalCanonicalEncoding> encoder;
+    if( canonical ) {
+        encoder = std::make_unique<MinimalCanonicalEncoding>( k );
+    }
+
+    // Collect the metadata for the sequences that we process, for the output json file.
+    auto sequences_json = genesis::util::format::JsonDocument::array();
+
+    // Get the thread pool to dispatch per-sequence work to.
+    auto thread_pool = global_options.thread_pool();
+
+    // -------------------------------------------------------------------
+    //     Main loop
+    // -------------------------------------------------------------------
+
+    LOG_MSG2
+        << "Memory usage before processing sequences: "
+        << text::to_string_byte_format( core::info_process_current_memory_usage() )
+    ;
+
+    // Sequentially iterate over the input fasta file, dispatching the k-mer extraction and
+    // index building for each sequence to the thread pool. We keep track of the total length
+    // of all sequences seen so far, which gives us the global offset of each new sequence in
+    // the concatenated coordinate space that the index positions refer to.
+    std::size_t total_length = 0;
+    std::size_t sequence_count = 0;
+    auto fasta_input = FastaInputStream( io::from_file( options.opt_fasta.value ));
+    fasta_input.reader().validate_labels( false );
+    for( auto& sequence : fasta_input ) {
+        ++sequence_count;
+        auto const offset = total_length;
+        total_length += sequence.sites().size();
+
+        // Check that the new total length still fits into the position type of the genome bins.
+        if(
+            total_length > 0 &&
+            ( total_length - 1 ) / w > static_cast<std::size_t>( std::numeric_limits<PositionT>::max() )
+        ) {
+            throw std::runtime_error(
+                "Reference genome is too large for the configured genome bin width and position "
+                "type: the highest genome bin index (" + std::to_string(( total_length - 1 ) / w ) +
+                ") does not fit into " + std::to_string( sizeof(PositionT) * 8 ) + " bits. "
+                "Increase --genome-bin-width, or use a larger --position-bits value."
+            );
+        }
+
+        // Record the sequence metadata for the output json file.
+        auto const& label = sequence.label();
+        auto const name_end = label.find_first_of( " \t" );
+        auto const name = ( name_end == std::string::npos ) ? label : label.substr( 0, name_end );
+        auto entry = genesis::util::format::JsonDocument::object();
+        entry["name"] = genesis::util::format::JsonDocument::string( name );
+        entry["header"] = genesis::util::format::JsonDocument::string( label );
+        entry["length"] = genesis::util::format::JsonDocument::number_unsigned( sequence.sites().size() );
+        sequences_json.push_back( std::move( entry ));
+
+        // Process the k-mers of this sequence in a separate thread.
+        auto seq_str = std::make_shared<std::string>( std::move( sequence.sites() ));
+        thread_pool->enqueue_detached( [&builder, &encoder, k, w, offset, seq_str]()
+        {
+            auto extractor = KmerExtractor( k, std::move( *seq_str ));
+            for( auto const& kmer : extractor ) {
+                auto const term_index = static_cast<typename Builder::term_index_type>(
+                    encoder ? encoder->encode( kmer ) : kmer.value
+                );
+                auto const global_pos = offset + kmer.location;
+                auto const bin_index = static_cast<PositionT>( global_pos / w );
+                builder.add( term_index, bin_index );
+            }
+        });
+    }
+    thread_pool->wait_for_all_pending_tasks();
+
+    LOG_MSG2
+        << "Memory usage after processing sequences: "
+        << text::to_string_byte_format( core::info_process_current_memory_usage() )
+    ;
+    LOG_MSG
+        << "Processed " << sequence_count << " sequences with a total length of "
+        << total_length << " bases."
+    ;
+
+    // -------------------------------------------------------------------
+    //     Write output
+    // -------------------------------------------------------------------
+
+    // Make sure that the output directory exists before we write any files into it.
+    genesis::util::core::dir_create( options.opt_output.out_dir() );
+
+    // Write the inverted index itself. We do not need to call builder.finalize() here,
+    // as write() already flushes all pending data as part of its single pass over the entries.
+    auto const index_path = options.opt_output.get_output_filename( "map-index", "sidx" );
+    auto const stats = builder.write( index_path );
+    LOG_MSG
+        << "Wrote index to " << index_path << " (" << stats.total_blob_bytes << " bytes of "
+        << "compressed posting data)."
+    ;
+
+    // Statistics output for the user.
+    size_t posting_count_sum = 0;
+    for( size_t i = 1; i + 1 < stats.posting_count_histogram.size(); ++i ) {
+        posting_count_sum += stats.posting_count_histogram[i];
+    }
+    LOG_MSG1 << "Builder statistics:";
+    LOG_MSG1 << "  Total blob size: " << text::to_string_byte_format( stats.total_blob_bytes );
+    LOG_MSG1 << "  Empty k-mers:    " << stats.posting_count_histogram.front();
+    LOG_MSG1 << "  Regular k-mers:  " << posting_count_sum;
+    LOG_MSG1 << "  Capped k-mers:   " << stats.posting_count_histogram.back();
+    LOG_MSG2 << "Detailed k-mer occurrence histogram (excluding empty and capped k-mers):";
+    for( size_t i = 1; i + 1 < stats.posting_count_histogram.size(); ++i ) {
+        if( stats.posting_count_histogram[i] > 0 ) {
+            LOG_MSG2 << "  K-mers with " << i << " occurrences: " << stats.posting_count_histogram[i];
+        }
+    }
+
+    // Write the json metadata file, describing the index and the reference it was built from.
+    auto doc = genesis::util::format::JsonDocument::object();
+    doc["fasta"] = genesis::util::format::JsonDocument::string( options.opt_fasta.value );
+    doc["index_file"] = genesis::util::format::JsonDocument::string( index_path );
+    doc["k"] = genesis::util::format::JsonDocument::number_unsigned( k );
+    doc["canonical"] = genesis::util::format::JsonDocument::boolean( canonical );
+    doc["genome_bin_width"] = genesis::util::format::JsonDocument::number_unsigned( w );
+    // doc["pending_capacity"] = genesis::util::format::JsonDocument::number_unsigned(
+    //     options.opt_pending_capacity.value
+    // );
+    doc["max_occurrences_per_kmer"] = genesis::util::format::JsonDocument::number_unsigned(
+        options.opt_max_occurrences_per_kmer.value
+    );
+    doc["position_bits"] = genesis::util::format::JsonDocument::number_unsigned(
+        options.opt_position_bits.value
+    );
+    doc["total_genome_length"] = genesis::util::format::JsonDocument::number_unsigned( total_length );
+    doc["sequences"] = std::move( sequences_json );
+
+    auto const json_target = options.opt_output.get_output_target( "map-index", "json" );
+    genesis::util::format::JsonWriter().write( doc, json_target );
+}
+
+} // anonymous namespace
+
+void run_map_index( MapIndexOptions const& options )
+{
+    if( options.opt_position_bits.value == 64 ) {
+        run_map_index_impl<std::uint64_t>( options );
+    } else {
+        run_map_index_impl<std::uint32_t>( options );
+    }
+}

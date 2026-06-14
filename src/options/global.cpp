@@ -124,11 +124,11 @@ void GlobalOptions::run_global()
         opt_threads.value = 1;
     }
 
-    // Initialize the global thread pool. We use one fewer than the number of specified thread
+    // Initialize the global thread pool. It uses one fewer than the number of specified thread
     // here, as we need to acount for the main thread doing work as well. We have implemented
     // a type of proactive future that also does work from the pool when waiting for results,
     // meaning that the main thread will also participate in the pool.
-    Options::get().init_global_thread_pool( opt_threads.value - 1 );
+    Options::get().init_global_thread_pool( opt_threads.value );
 
     // Allow to overwrite files. Has to be done before adding the log file (coming below),
     // as this might already fail if the log file exists.
