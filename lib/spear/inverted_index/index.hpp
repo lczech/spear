@@ -128,8 +128,14 @@ public:
         /// The posting list was decoded into the output buffer.
         kFound,
 
-        /// The term exceeded max_postings_per_term and was discarded; result is empty.
-        kCapped
+        /// The term exceeded max_postings_per_term and was discarded at build time;
+        /// result is empty. This is a "hard cap" baked into the index itself.
+        kHardCapped,
+
+        /// The term's posting count exceeded the caller-supplied max_posting_list_length
+        /// for this call; result is empty, but the data is still present in the index
+        /// (unlike kHardCapped). This is a "soft cap" applied per query.
+        kSoftCapped
     };
 
     // -------------------------------------------------------------------------
@@ -284,14 +290,24 @@ public:
      * @brief Decode the posting list for @p term_index into @p target_buf.
      *
      * Resizes @p target_buf to the posting count and fills it with decoded positions.
-     * For empty or capped terms @p target_buf is cleared.  Reusing @p target_buf across
-     * calls avoids repeated allocations on the hot path.
-     * Returns PostingsStatus::kFound, kEmpty, or kCapped accordingly.
+     * For empty, capped, or soft-capped terms @p target_buf is cleared.  Reusing
+     * @p target_buf across calls avoids repeated allocations on the hot path.
+     *
+     * @param max_posting_list_length  If non-zero, terms whose posting count exceeds this
+     *        value are treated as kSoftCapped: the decode is skipped entirely (the count
+     *        is available from the offset table alone), but unlike kHardCapped, the data
+     *        remains in the index and would be returned with a higher or zero limit.
+     *        This allows experimenting with tighter caps at query time without rebuilding
+     *        the index. Default 0 means no soft cap is applied.
+     *
+     * Returns PostingsStatus::kFound, kEmpty, kHardCapped, or kSoftCapped accordingly.
      * Thread-safe in both OpenMode variants.
      */
     PostingsStatus
-    postings( term_index_type term_index, std::vector<PositionT>& target_buf ) const
-    {
+    postings(
+        term_index_type term_index, std::vector<PositionT>& target_buf,
+        std::uint64_t max_posting_list_length = 0
+    ) const {
         assert( footer_.magic == INVERTED_INDEX_MAGIC );
         assert( footer_.num_terms == offset_table_.size() );
 
@@ -306,14 +322,18 @@ public:
         // Look up the byte offset and count for this term
         auto const [byte_offset, count] = offset_table_[term_index];
 
-        // Empty and capped terms carry no blob data
+        // Empty and hard-capped terms carry no blob data
         if( count == 0 ) {
             target_buf.clear();
             return PostingsStatus::kEmpty;
         }
         if( footer_.max_postings_per_term != 0 && count >= capped_sentinel() ) {
             target_buf.clear();
-            return PostingsStatus::kCapped;
+            return PostingsStatus::kHardCapped;
+        }
+        if( max_posting_list_length != 0 && count > max_posting_list_length ) {
+            target_buf.clear();
+            return PostingsStatus::kSoftCapped;
         }
 
         // Resize the output buffer to hold exactly the decoded positions

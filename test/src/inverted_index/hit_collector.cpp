@@ -141,12 +141,67 @@ TEST( TermPostings, StatsViaIndex )
     TP tp( 3 );
     tp.add( idx, 0 ); // kEmpty
     tp.add( idx, 1 ); // kFound
-    tp.add( idx, 2 ); // kCapped
+    tp.add( idx, 2 ); // kHardCapped
 
-    EXPECT_EQ( tp.stats().empty,  1u );
-    EXPECT_EQ( tp.stats().found,  1u );
-    EXPECT_EQ( tp.stats().capped, 1u );
+    EXPECT_EQ( tp.stats().empty,       1u );
+    EXPECT_EQ( tp.stats().found,       1u );
+    EXPECT_EQ( tp.stats().hard_capped, 1u );
     EXPECT_EQ( tp.list_count(), 1u );
+}
+
+TEST( TermPostings, SoftCap )
+{
+    // Build a small index with no build-time cap: term 0 has 1 posting, term 1 has 3.
+    TempFile tmp;
+    {
+        InvertedIndexBuilder<>::Config cfg;
+        InvertedIndexBuilder<> builder( 2, cfg );
+        builder.add( 0, 42 );
+        builder.add( 1, 10 );
+        builder.add( 1, 20 );
+        builder.add( 1, 30 );
+        builder.write( tmp.path );
+    }
+
+    InvertedIndex<> idx;
+    idx.open( tmp.path, InvertedIndex<>::OpenMode::kLoadAll );
+
+    // Default: no soft cap, both terms found.
+    {
+        TP tp( 2 );
+        EXPECT_EQ( tp.max_posting_list_length(), 0u );
+        EXPECT_EQ( tp.add( idx, 0 ), TermPostings<std::uint64_t>::PostingsStatus::kFound );
+        EXPECT_EQ( tp.add( idx, 1 ), TermPostings<std::uint64_t>::PostingsStatus::kFound );
+        EXPECT_EQ( tp.stats().found,       2u );
+        EXPECT_EQ( tp.stats().soft_capped, 0u );
+        EXPECT_EQ( tp.list_count(), 2u );
+    }
+
+    // Soft cap of 1 via constructor: term 1 (3 postings) is soft-capped, term 0 (1) is not.
+    {
+        TP tp( 2, /* max_posting_list_length */ 1 );
+        EXPECT_EQ( tp.max_posting_list_length(), 1u );
+        EXPECT_EQ( tp.add( idx, 0 ), TermPostings<std::uint64_t>::PostingsStatus::kFound );
+        EXPECT_EQ( tp.add( idx, 1 ), TermPostings<std::uint64_t>::PostingsStatus::kSoftCapped );
+        EXPECT_EQ( tp.stats().found,       1u );
+        EXPECT_EQ( tp.stats().soft_capped, 1u );
+        EXPECT_EQ( tp.list_count(), 1u );
+        auto const list0 = tp.list_at( 0 );
+        EXPECT_EQ( ( std::vector<std::uint64_t>( list0.begin(), list0.end() ) ),
+                   ( std::vector<std::uint64_t>{ 42 } ));
+    }
+
+    // Soft cap raised via setter: term 1 is found again.
+    {
+        TP tp( 2, /* max_posting_list_length */ 1 );
+        tp.set_max_posting_list_length( 3 );
+        EXPECT_EQ( tp.max_posting_list_length(), 3u );
+        EXPECT_EQ( tp.add( idx, 0 ), TermPostings<std::uint64_t>::PostingsStatus::kFound );
+        EXPECT_EQ( tp.add( idx, 1 ), TermPostings<std::uint64_t>::PostingsStatus::kFound );
+        EXPECT_EQ( tp.stats().found,       2u );
+        EXPECT_EQ( tp.stats().soft_capped, 0u );
+        EXPECT_EQ( tp.list_count(), 2u );
+    }
 }
 
 // =================================================================================================

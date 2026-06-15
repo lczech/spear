@@ -150,7 +150,7 @@ TEST( InvertedIndex, RoundTripLoadAll )
     EXPECT_TRUE( idx.is_capped( 3 ) );
     {
         auto const [posts, status] = idx.postings( 3 );
-        EXPECT_EQ( status, Index::PostingsStatus::kCapped );
+        EXPECT_EQ( status, Index::PostingsStatus::kHardCapped );
         EXPECT_TRUE( posts.empty() );
     }
 
@@ -204,7 +204,7 @@ TEST( InvertedIndex, RoundTripPread )
     EXPECT_TRUE( idx.is_capped( 3 ) );
     {
         auto const [posts, status] = idx.postings( 3 );
-        EXPECT_EQ( status, Index::PostingsStatus::kCapped );
+        EXPECT_EQ( status, Index::PostingsStatus::kHardCapped );
         EXPECT_TRUE( posts.empty() );
     }
 
@@ -215,6 +215,48 @@ TEST( InvertedIndex, RoundTripPread )
         auto const [posts, status] = idx.postings( 4 );
         EXPECT_EQ( status, Index::PostingsStatus::kFound );
         EXPECT_EQ( posts, ( std::vector<std::uint64_t>{ 42 } ));
+    }
+}
+
+TEST( InvertedIndex, SoftCap )
+{
+    TempFile tmp;
+    build_test_index( tmp.path );
+
+    for( auto const mode : { Index::OpenMode::kLoadAll, Index::OpenMode::kPread } ) {
+        Index idx;
+        idx.open( tmp.path, mode );
+
+        std::vector<std::uint64_t> buf;
+
+        // Term 1 has 3 postings {10, 20, 30}.
+
+        // max_posting_list_length == 0 means unlimited: not soft-capped.
+        EXPECT_EQ( idx.postings( 1, buf, 0 ), Index::PostingsStatus::kFound );
+        EXPECT_EQ( buf, ( std::vector<std::uint64_t>{ 10, 20, 30 } ));
+
+        // max_posting_list_length == count: not soft-capped (only strictly more is capped).
+        EXPECT_EQ( idx.postings( 1, buf, 3 ), Index::PostingsStatus::kFound );
+        EXPECT_EQ( buf, ( std::vector<std::uint64_t>{ 10, 20, 30 } ));
+
+        // max_posting_list_length < count: soft-capped, decode skipped, buf cleared.
+        EXPECT_EQ( idx.postings( 1, buf, 2 ), Index::PostingsStatus::kSoftCapped );
+        EXPECT_TRUE( buf.empty() );
+
+        // Term 2 has 2 postings {100, 200}.
+        EXPECT_EQ( idx.postings( 2, buf, 1 ), Index::PostingsStatus::kSoftCapped );
+        EXPECT_TRUE( buf.empty() );
+        EXPECT_EQ( idx.postings( 2, buf, 2 ), Index::PostingsStatus::kFound );
+        EXPECT_EQ( buf, ( std::vector<std::uint64_t>{ 100, 200 } ));
+
+        // Term 0 is empty: kEmpty takes priority over any soft cap.
+        EXPECT_EQ( idx.postings( 0, buf, 1 ), Index::PostingsStatus::kEmpty );
+        EXPECT_TRUE( buf.empty() );
+
+        // Term 3 is hard-capped at build time: kHardCapped takes priority over any soft cap,
+        // even one that would not have triggered (the data is gone either way).
+        EXPECT_EQ( idx.postings( 3, buf, 1000 ), Index::PostingsStatus::kHardCapped );
+        EXPECT_TRUE( buf.empty() );
     }
 }
 

@@ -95,9 +95,10 @@ public:
      */
     struct Stats
     {
-        std::size_t found  = 0;
-        std::size_t empty  = 0;
-        std::size_t capped = 0;
+        std::size_t found       = 0;
+        std::size_t empty       = 0;
+        std::size_t hard_capped = 0;
+        std::size_t soft_capped = 0;
     };
 
     // -------------------------------------------------------------------------
@@ -108,14 +109,44 @@ public:
      * @brief Construct with a pool of @p max_terms decode buffers.
      *
      * @p max_terms must be at least the total number of add() calls that will be made
-     * before the next clear(). kEmpty and kCapped results do not consume a permanent slot
-     * but they do require a temporary slot during decoding, so size this to the total
-     * number of add() calls (typically S, the number of queried terms).
+     * before the next clear(). kEmpty, kHardCapped, and kSoftCapped results do not consume a
+     * permanent slot but they do require a temporary slot during decoding, so size this to
+     * the total number of add() calls (typically S, the number of queried terms).
+     *
+     * @param max_posting_list_length  Forwarded to InvertedIndex::postings() on every add();
+     *        terms whose posting count exceeds this are treated as kSoftCapped, skipping
+     *        decode entirely. Default 0 means no soft cap. See set_max_posting_list_length().
      */
-    explicit TermPostings( std::size_t max_terms )
+    explicit TermPostings( std::size_t max_terms, std::uint64_t max_posting_list_length = 0 )
         : lists_( max_terms )
+        , max_posting_list_length_( max_posting_list_length )
     {
         deferred_.reserve( max_terms );
+    }
+
+    // -------------------------------------------------------------------------
+    //     Settings
+    // -------------------------------------------------------------------------
+
+    /**
+     * @brief Set the soft cap on posting list length, forwarded to InvertedIndex::postings().
+     *
+     * Terms whose posting count exceeds this are treated as kSoftCapped, skipping decode
+     * entirely. A value of 0 disables the soft cap. Unlike the index's own (hard) cap, this
+     * can be changed at any time without rebuilding the index, e.g. to experiment with
+     * different limits across runs.
+     */
+    void set_max_posting_list_length( std::uint64_t max_posting_list_length ) noexcept
+    {
+        max_posting_list_length_ = max_posting_list_length;
+    }
+
+    /**
+     * @brief Current soft cap on posting list length; 0 means unlimited.
+     */
+    std::uint64_t max_posting_list_length() const noexcept
+    {
+        return max_posting_list_length_;
     }
 
     // -------------------------------------------------------------------------
@@ -148,8 +179,8 @@ public:
      *
      * Throws std::runtime_error if the pool is full (i.e. add() has been called more
      * times than max_terms allows). kFound results claim a slot and increment list_count().
-     * kEmpty and kCapped results are counted in the histogram but do not claim a slot;
-     * the same slot is reused by the next add() call.
+     * kEmpty, kHardCapped, and kSoftCapped results are counted in the histogram but do not
+     * claim a slot; the same slot is reused by the next add() call.
      *
      * Returns the PostingsStatus for caller inspection.
      */
@@ -162,9 +193,10 @@ public:
                 "TermPostings::add: pool capacity exceeded; increase max_terms"
             );
         }
-        // Decode into the next slot. For kEmpty/kCapped the slot is cleared by postings()
-        // but count_ is not incremented, so the slot is reused by the next add() call.
-        auto const status = index.postings( term_idx, lists_[count_] );
+        // Decode into the next slot. For kEmpty/kHardCapped/kSoftCapped the slot is cleared
+        // by postings() but count_ is not incremented, so the slot is reused by the next
+        // add() call.
+        auto const status = index.postings( term_idx, lists_[count_], max_posting_list_length_ );
 
         switch( status ) {
             case PostingsStatus::kFound:
@@ -174,8 +206,11 @@ public:
             case PostingsStatus::kEmpty:
                 ++hist_.empty;
                 break;
-            case PostingsStatus::kCapped:
-                ++hist_.capped;
+            case PostingsStatus::kHardCapped:
+                ++hist_.hard_capped;
+                break;
+            case PostingsStatus::kSoftCapped:
+                ++hist_.soft_capped;
                 break;
         }
         return status;
@@ -339,6 +374,7 @@ private:
     std::vector<term_index_type>        deferred_;
     std::size_t                         count_ = 0;
     Stats                               hist_  = {};
+    std::uint64_t                       max_posting_list_length_ = 0;
 };
 
 } // namespace spear::inverted_index
