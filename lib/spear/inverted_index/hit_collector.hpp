@@ -33,6 +33,7 @@
 
 #include "spear/inverted_index/index.hpp"
 #include "spear/inverted_index/term_postings.hpp"
+#include "genesis/util/container/tournament_tree.hpp"
 
 #include <algorithm>
 #include <array>
@@ -58,12 +59,15 @@ namespace spear::inverted_index {
  * sliding window of size L can be placed anywhere within it and still see at least M
  * distinct posting lists represented.
  *
- * Internally runs a streaming k-way merge over the S sorted posting lists via a min-heap,
- * maintaining a small ring buffer (size @p RingCap, a power of two, such that RingCap > L)
- * of (value, Bitset256) window entries. All scratch state (heap, ring buffer) is held as
- * members and reused across calls to avoid per-query allocations.
+ * Internally runs a streaming k-way merge over the S sorted posting lists via a
+ * genesis::util::container::TournamentTree, maintaining a small ring buffer (size @p RingCap,
+ * a power of two, such that RingCap > L) of (value, Bitset256) window entries. All scratch
+ * state (tournament tree, ring buffer) is held as members and reused across calls to avoid
+ * per-query allocations.
  *
- * @tparam PositionT  Unsigned integer type for posting positions.
+ * @tparam PositionT  Unsigned integer type for posting positions. numeric_limits<PositionT>::max()
+ *                    is reserved as a sentinel by the tournament tree and must not appear as an
+ *                    actual posting value; InvertedIndex::open() enforces this via max_position().
  * @tparam RingCap    Ring buffer capacity; must be a power of two and satisfy RingCap > L
  *                    for every L passed to query(). Default 16 supports L up to 15.
  *                    Use 128 for L up to 127, etc.
@@ -136,21 +140,10 @@ public:
             );
         }
 
-        // Seed the min-heap (one entry per non-empty posting list)
-        heap_.clear();
-        heap_.reserve( coll.list_count() );
-        for( std::size_t i = 0; i < coll.list_count(); ++i ) {
-            auto const sp = coll.list_at( i );
-            if( !sp.empty() ) {
-                heap_.push_back({
-                    sp[0],
-                    sp.data(),
-                    sp.data() + sp.size(),
-                    i
-                });
-            }
-        }
-        std::make_heap( heap_.begin(), heap_.end(), HeapCmp{} );
+        // Build a fresh tournament tree, sized to the actual number of input lists, and
+        // seed it with one bin per posting list.
+        genesis::util::container::TournamentTree<PositionT> tree( coll.list_count() );
+        tree.build( coll.lists() );
 
         // Ring buffer state
         // ring_head and ring_tail are monotonically increasing;
@@ -182,23 +175,13 @@ public:
         std::size_t peak_count   = 0;
 
         // Streaming k-way merge
-        while( !heap_.empty() ) {
+        while( !tree.empty() ) {
 
-            // Pop the globally minimum value
-            std::pop_heap( heap_.begin(), heap_.end(), HeapCmp{} );
-            HeapEntry& e = heap_.back();
-
-            PositionT const   val      = e.value;
-            std::size_t const list_idx = e.list_idx;
-
-            // Advance this list's cursor; re-insert if not exhausted, else remove
-            ++e.cur;
-            if( e.cur != e.end ) {
-                e.value = *e.cur;
-                std::push_heap( heap_.begin(), heap_.end(), HeapCmp{} );
-            } else {
-                heap_.pop_back();
-            }
+            // Read the globally minimum value, then advance past it
+            auto const& top = tree.top();
+            PositionT const   val      = top.value;
+            std::size_t const list_idx = top.list_index;
+            tree.pop();
 
             // Add to ring buffer (tail-check dedup)
             // Equal values from different lists arrive consecutively from the min-heap,
@@ -287,7 +270,7 @@ private:
      *  4. The guard in `HitCollector::query`: update the `list_count() > 256` threshold
      *     to match the new capacity (64 * array size).
      * `set()` already uses `i >> 6` / `i & 63u` generically and needs no change.
-     * `HeapEntry::list_idx` is `std::size_t` and also needs no change.
+     * `TournamentTree::BinEntry::list_index` is `std::size_t` and also needs no change.
      */
     struct Bitset256
     {
@@ -326,24 +309,7 @@ private:
         Bitset256 bits;
     };
 
-    struct HeapEntry
-    {
-        PositionT          value;    // current value at cursor (cached to avoid indirection)
-        PositionT const*   cur;      // pointer to current element in the posting list
-        PositionT const*   end;      // one past the last element
-        std::size_t        list_idx; // which slot in TermPostings
-    };
-
-    struct HeapCmp
-    {
-        bool operator()( HeapEntry const& a, HeapEntry const& b ) const noexcept
-        {
-            return a.value > b.value; // min-heap: smaller value has higher priority
-        }
-    };
-
     std::array<WindowEntry, RingCap> ring_{};
-    std::vector<HeapEntry>           heap_;
 };
 
 } // namespace spear::inverted_index

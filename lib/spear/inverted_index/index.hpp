@@ -44,6 +44,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -228,6 +229,15 @@ public:
                 "-bit positions but InvertedIndex<" +
                 ( sizeof( PositionT ) == 4 ? "uint32_t" : "uint64_t" ) +
                 "> expects " + std::to_string( expected_bits ) + "-bit positions"
+            );
+        }
+
+        // HitCollector's TournamentTree uses numeric_limits<PositionT>::max() as a sentinel
+        // for exhausted/padding bins, and requires that no real posting value equals it.
+        if( footer_.max_position == std::numeric_limits<PositionT>::max() ) {
+            throw std::runtime_error(
+                "'" + path + "': max_position equals numeric_limits<PositionT>::max(), "
+                "which is reserved as a sentinel value and cannot appear in posting data"
             );
         }
 

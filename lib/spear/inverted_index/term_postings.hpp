@@ -364,6 +364,18 @@ public:
         return hist_;
     }
 
+    /**
+     * @brief The successfully decoded (kFound) posting lists, in add() order.
+     *
+     * Only the first list_count() entries of the underlying pool are valid; slots beyond
+     * that may hold stale data from a previous, larger round. The returned span covers
+     * exactly the valid entries.
+     */
+    std::span<std::vector<PositionT> const> lists() const noexcept
+    {
+        return std::span<std::vector<PositionT> const>( lists_.data(), count_ );
+    }
+
     // -------------------------------------------------------------------------
     //     Data members
     // -------------------------------------------------------------------------
