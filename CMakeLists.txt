@@ -175,7 +175,7 @@ set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/tools/cma
 # These are replaced by tools/cmake/update_dependencies.sh to the hashes that are currently checked out.
 # Thus, do not replace the hashes manually!
 SET( CLI11_GIT_TAG "37bb6edc5317e99af72ef48405e65d9ca5218861" ) #CLI11_GIT_TAG#
-SET( genesis_GIT_TAG "82b36eba5f33d4fdd60d1fc592aed9210e94f400" ) #genesis_GIT_TAG#
+SET( genesis_GIT_TAG "90f673b94f285478d1a26b2c16687b5ec5386102" ) #genesis_GIT_TAG#
 SET( TurboPFor_GIT_TAG "06d6aad98b4be5471289f35d5d04fac4469cf6df" ) #TurboPFor_GIT_TAG#
 
 # Include the libaries and make them available here
