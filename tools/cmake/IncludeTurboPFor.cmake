@@ -25,7 +25,7 @@
 
 # Check if the submodule was initialized; otherwise fetch from GitHub
 message (STATUS "Looking for TurboPFor")
-set(TURBOPFOR_SUBMODULE_DIR ${PROJECT_SOURCE_DIR}/deps/TurboPFor-Integer-Compression)
+set(TURBOPFOR_SUBMODULE_DIR ${PROJECT_SOURCE_DIR}/deps/TurboPFor)
 if (EXISTS "${TURBOPFOR_SUBMODULE_DIR}/include/ic.h")
     message(STATUS "Using TurboPFor submodule")
     set(TURBOPFOR_SOURCE "${TURBOPFOR_SUBMODULE_DIR}")

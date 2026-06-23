@@ -76,4 +76,4 @@ function update_git_tag() {
 update_git_tag "CLI11"
 update_git_tag "genesis"
 update_git_tag "googletest"
-update_git_tag "TurboPFor-Integer-Compression"
+update_git_tag "TurboPFor"
