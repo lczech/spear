@@ -177,11 +177,13 @@ set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/tools/cma
 SET( CLI11_GIT_TAG "37bb6edc5317e99af72ef48405e65d9ca5218861" ) #CLI11_GIT_TAG#
 SET( genesis_GIT_TAG "90f673b94f285478d1a26b2c16687b5ec5386102" ) #genesis_GIT_TAG#
 SET( TurboPFor_GIT_TAG "06d6aad98b4be5471289f35d5d04fac4469cf6df" ) #TurboPFor_GIT_TAG#
+SET( wfa2_GIT_TAG "bcf473a6561fa297934a80eaa7c04b4ee412360c" ) #wfa2_GIT_TAG#
 
 # Include the libaries and make them available here
 include( IncludeCLI11 )
 include( IncludeGenesis )
 include( IncludeTurboPFor )
+include( IncludeWFA2 )
 
 # --------------------------------------------------------------------------------------------------
 #   Dependencies Settings
@@ -228,7 +230,8 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/test)
 # We have to use LTO for spear as well for some compilers to properly link, I think.
 if(GENESIS_HAS_LTO)
     message(STATUS "Building with LTO/IPO support")
-    set_property(TARGET spear PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET spear       PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET wfa2_static PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 else()
     message(STATUS "Building without LTO/IPO support")
 endif()

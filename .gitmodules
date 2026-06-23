@@ -10,3 +10,6 @@
 [submodule "deps/TurboPFor"]
 	path = deps/TurboPFor
 	url = https://github.com/powturbo/TurboPFor-Integer-Compression
+[submodule "deps/wfa2"]
+	path = deps/wfa2
+	url = https://github.com/smarco/WFA2-lib.git

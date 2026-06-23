@@ -24,6 +24,7 @@ target_link_libraries(spear_lib_obj
         genesis_lib_static
     PRIVATE
         turbopfor
+        wfa2_static
 )
 
 # Static archive built from the object files
@@ -41,4 +42,5 @@ target_link_libraries(spear_lib_static
         genesis_lib_static
         PRIVATE
         turbopfor
+        wfa2_static
 )
