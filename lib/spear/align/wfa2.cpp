@@ -182,13 +182,15 @@ Wfa2Result Wfa2Aligner::align_score( std::string const& query, std::string const
         throw std::invalid_argument( "wfa2::align_score: non-empty query against empty reference" );
     }
     if( query.empty() ) {
-        return Wfa2Result{ .ref_begin = 0, .ref_end = 0, .score = 0, .status = Wfa2Result::Status::Ok };
+        return Wfa2Result{
+            .ref_begin = 0, .ref_end = 0, .score = 0, .status = Wfa2Result::Status::Ok, .cigar = {}
+        };
     }
 
     // Compute alignment
     auto const s = map_wfa_status( impl_->run_align( query, target ));
     if( s != Wfa2Result::Status::Ok ) {
-        return Wfa2Result{ .status = s };
+        return Wfa2Result{ .status = s, .cigar = {} };
     }
 
     // Copy results to our struct
@@ -198,6 +200,7 @@ Wfa2Result Wfa2Aligner::align_score( std::string const& query, std::string const
         .ref_end   = wfa->alignment_end_pos.offset,  // fitting endpoint in reference
         .score     = wfa->cigar->score,
         .status    = Wfa2Result::Status::Ok,
+        .cigar     = {},
     };
 }
 
@@ -211,13 +214,15 @@ Wfa2Result Wfa2Aligner::align_cigar( std::string const& query, std::string const
         throw std::invalid_argument( "wfa2::align_cigar: non-empty query against empty reference" );
     }
     if( query.empty() ) {
-        return Wfa2Result{ .ref_begin = 0, .ref_end = 0, .score = 0, .status = Wfa2Result::Status::Ok };
+        return Wfa2Result{
+            .ref_begin = 0, .ref_end = 0, .score = 0, .status = Wfa2Result::Status::Ok, .cigar = {}
+        };
     }
 
     // Compute alignment
     auto const s = map_wfa_status( impl_->run_align( query, target ));
     if( s != Wfa2Result::Status::Ok ) {
-        return Wfa2Result{ .status = s };
+        return Wfa2Result{ .status = s, .cigar = {} };
     }
 
     auto* wfa = impl_->wfa;
