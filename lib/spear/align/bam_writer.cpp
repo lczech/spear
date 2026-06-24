@@ -258,7 +258,7 @@ struct BamWriter::Impl
 
         int const ret = bam_set1(
             rec,
-            name.size() + 1,
+            name.size(),
             name.c_str(),
             flags,
             hit.ref_id,
