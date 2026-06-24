@@ -47,7 +47,7 @@ struct DamageArgs
 
 // Branchless damage-aware match function for wavefront_align_lambda().
 // Returns 1 (match) for exact matches plus tolerated damage substitutions within their zones.
-static int damage_match_fn( int v, int h, void* args_ )
+static inline int damage_match_fn( int v, int h, void* args_ )
 {
     auto const* a = static_cast<DamageArgs const*>( args_ );
     auto const  q = static_cast<unsigned char>( a->query[v]  );
@@ -209,29 +209,37 @@ Wfa2Result Wfa2Aligner::align_cigar( std::string const& query, std::string const
     }
 
     auto* wfa = impl_->wfa;
+    cigar_t* cig = wfa->cigar;
 
     // Encode into WFA2's internal buffer (BAM uint32_t RLE format) and get a pointer to it.
+    // cigar_buffer points into cig->cigar_buffer (no allocation); copy it into the vector below.
     uint32_t* cigar_buffer = nullptr;
     int       cigar_length = 0;
-    cigar_get_CIGAR( wfa->cigar, false, &cigar_buffer, &cigar_length );
+    cigar_get_CIGAR( cig, impl_->settings.use_extended_cigar, &cigar_buffer, &cigar_length );
 
-    // Derive ref_begin by counting reference-consuming ops (M, X, D).
-    cigar_t const* cig = wfa->cigar;
+    // Derive ref_begin by summing reference-consuming op lengths from the RLE binary buffer.
+    // WFA2 gap-affine only emits M(0), I(1), D(2), =(7), X(8); codes 3-6 are never produced
+    // and indicate a bug if seen (N(3) would silently mis-count ref_span, others are non-consuming
+    // but meaningless in this context).
+    // BAM op codes: 0=M 1=I 2=D 3=N 4=S 5=H 6=P 7== 8=X; WFA2 gap-affine only emits 0,1,2,7,8.
     int ref_span = 0;
-    for( int i = cig->begin_offset; i < cig->end_offset; ++i ) {
-        char const op = cig->operations[i];
-        if( op == 'M' || op == 'X' || op == 'D' ) {
-            ++ref_span;
+    for( int i = 0; i < cigar_length; ++i ) {
+        uint32_t const op  = cigar_buffer[i] & 0xF;
+        if( op == 0 || op == 2 || op == 7 || op == 8 ) { // M, D, =, X: consume reference
+            uint32_t const len = cigar_buffer[i] >> 4;
+            ref_span += static_cast<int>( len );
+        } else if( op != 1 ) { // op == 1 (I) consumes query only; anything else is unexpected
+            throw std::logic_error( "wfa2: unexpected CIGAR op code " + std::to_string( op ));
         }
     }
 
-    // Copy results to our struct
+    // Copy results to our struct; cigar is copied once here into an owning vector.
     return Wfa2Result{
         .ref_begin = cig->end_h - ref_span,
         .ref_end   = cig->end_h,
         .score     = cig->score,
         .status    = Wfa2Result::Status::Ok,
-        .cigar     = { cigar_buffer, static_cast<std::size_t>( cigar_length ) },
+        .cigar     = std::vector<uint32_t>( cigar_buffer, cigar_buffer + cigar_length ),
     };
 }
 

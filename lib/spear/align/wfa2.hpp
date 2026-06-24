@@ -26,8 +26,8 @@
 
 #include <cstdint>
 #include <memory>
-#include <span>
 #include <string>
+#include <vector>
 
 namespace spear::align {
 
@@ -57,8 +57,8 @@ struct Wfa2Settings
      * Cigar additionally computes ref_begin and the full CIGAR string.
      */
     enum class Scope {
-        Score, ///< Score + ref_end only; faster, no backtrace.
-        Cigar, ///< Score + ref_begin + ref_end + CIGAR.
+        Score, ///< `score` + `ref_end` only; faster, no backtrace.
+        Cigar, ///< `score` + `ref_begin` + `ref_end` + CIGAR.
     };
 
     /// Scope of results to compute; fixed at construction.
@@ -86,6 +86,18 @@ struct Wfa2Settings
      * guarantees completion at any realistic divergence.
      */
     int max_steps = 4096;
+
+    /**
+     * @brief Emit `X/=` CIGAR operators instead of the ambiguous `M` operator.
+     *
+     * When true (default), `=` marks a sequence match and `X` marks a mismatch.
+     * When false, both are collapsed to `M` for compatibility with old tools.
+     *
+     * X/= CIGAR is preferred: it lets NM be computed from the CIGAR alone and
+     * gives mapDamage and similar tools explicit mismatch positions. M-CIGAR
+     * requires the reference window to derive NM (via samtools calmd).
+     */
+    bool use_extended_cigar = true;
 };
 
 // =================================================================================================
@@ -120,12 +132,12 @@ struct Wfa2Result
     Status status = Status::Ok;
 
     /**
-     * @brief View into WFA2's internal CIGAR buffer in BAM uint32_t RLE format.
+     * @brief CIGAR in BAM uint32_t RLE format, owned by this result.
      *
-     * Only populated for Scope::Cigar and Status::Ok; empty span otherwise.
-     * Valid only until the next align_*() call on the same aligner.
+     * Only populated for Scope::Cigar and Status::Ok; empty otherwise.
+     * Safe to move into AlignmentHit::cigar without any copy.
      */
-    std::span<uint32_t const> cigar;
+    std::vector<uint32_t> cigar;
 };
 
 // =================================================================================================

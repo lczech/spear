@@ -31,6 +31,8 @@
 
 #include <genesis/sequence/sequence.hpp>
 
+#include "spear/align/cigar.hpp"
+
 namespace spear::align {
 
 // =================================================================================================
@@ -141,7 +143,10 @@ struct AlignmentHit
     //     Tags: alignment quality annotations
     // -------------------------------------------------------------------------
 
-    /// AS aux tag: alignment score from the aligner (always written).
+    /// AS aux tag: alignment score; higher = better alignment (always written).
+    /// For WFA2 with match=0 (standard), this equals -(raw WFA2 penalty): 0 for a perfect
+    /// alignment, more negative as penalties accumulate. HitSelectionPolicy::score_window
+    /// is expressed in the same units (absolute score difference from the best hit).
     int                   tag_as       = 0;
 
     /// NM aux tag: edit distance (mismatches + indel bases); omitted if empty.
@@ -176,33 +181,6 @@ struct ReadRecord
     /// All alignment hits for this read; [0] is primary.
     std::vector<AlignmentHit> hits;
 };
-
-// =================================================================================================
-//     CIGAR utilities
-// =================================================================================================
-
-/**
- * @brief Convert a CIGAR vector to its SAM text form (e.g. "36M2I5D").
- *
- * Each uint32_t element encodes one run as `(length << 4) | op_code`, where op codes are:
- *
- * ```
- * 0=M  1=I  2=D  3=N  4=S  5=H  6=P  7==  8=X
- * ```
- *
- * This is the binary BAM CIGAR format, also used by WFA2's cigar_t::cigar_buffer.
- */
-inline std::string cigar_to_string( std::vector<uint32_t> const& cigar )
-{
-    static constexpr char ops[] = "MIDNSHP=X";
-    std::string result;
-    result.reserve( cigar.size() * 4 );
-    for( uint32_t const c : cigar ) {
-        result += std::to_string( c >> 4 );
-        result += ops[ c & 0xF ];
-    }
-    return result;
-}
 
 } // namespace spear::align
 
