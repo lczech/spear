@@ -49,8 +49,7 @@ using namespace spear::align;
 using genesis::sequence::Sequence;
 using genesis::sequence::SequenceSet;
 
-// BAM CIGAR encoding: (length << 4) | op_code
-// 0=M 1=I 2=D 3=N 4=S 5=H 6=P 7== 8=X
+// BAM CIGAR encoding helper: (length << 4) | CigarOp::Op
 static constexpr uint32_t op( uint32_t len, uint32_t code ) { return (len << 4) | code; }
 
 // =================================================================================================
@@ -72,7 +71,7 @@ static ReadRecord make_record(
     int32_t               ref_id  = 0,
     int64_t               ref_pos = 0,
     uint8_t               mapq    = 60,
-    std::vector<uint32_t> cigar   = { op(4, 7) },
+    std::vector<uint32_t> cigar   = { op(4, CigarOp::E) },
     uint16_t              flags   = 0,
     int                   tag_as  = 0
 ) {
@@ -346,7 +345,7 @@ TEST( HitSelection, NoFiltersAllPass )
             AlignmentHit hit;
             hit.ref_id  = 0;
             hit.ref_pos = i * 10;
-            hit.cigar   = { op(4, 7) };
+            hit.cigar   = { op(4, CigarOp::E) };
             rr.hits.push_back( hit );
         }
         w.write( std::move(rr) );
@@ -369,7 +368,7 @@ TEST( HitSelection, MaxHitsLimit )
             AlignmentHit hit;
             hit.ref_id  = 0;
             hit.ref_pos = i * 10;
-            hit.cigar   = { op(4, 7) };
+            hit.cigar   = { op(4, CigarOp::E) };
             rr.hits.push_back( hit );
         }
         w.write( std::move(rr) );
@@ -389,8 +388,8 @@ TEST( HitSelection, MinMapqFiltersLowQuality )
         rr.read.label("r1");
         rr.read.sites("ACGT");
         AlignmentHit low, high;
-        low.ref_id  = 0; low.ref_pos  = 0;  low.mapq  = 25; low.cigar  = { op(4, 7) };
-        high.ref_id = 0; high.ref_pos = 10; high.mapq = 30; high.cigar = { op(4, 7) };
+        low.ref_id  = 0; low.ref_pos  = 0;  low.mapq  = 25; low.cigar  = { op(4, CigarOp::E) };
+        high.ref_id = 0; high.ref_pos = 10; high.mapq = 30; high.cigar = { op(4, CigarOp::E) };
         rr.hits.push_back( low );
         rr.hits.push_back( high );
         w.write( std::move(rr) );
@@ -413,7 +412,7 @@ TEST( HitSelection, MinMapqAtThresholdPasses )
         rr.read.label("r1");
         rr.read.sites("ACGT");
         AlignmentHit hit;
-        hit.ref_id = 0; hit.ref_pos = 0; hit.mapq = 30; hit.cigar = { op(4, 7) };
+        hit.ref_id = 0; hit.ref_pos = 0; hit.mapq = 30; hit.cigar = { op(4, CigarOp::E) };
         rr.hits.push_back( hit );
         w.write( std::move(rr) );
     }
@@ -434,7 +433,7 @@ TEST( HitSelection, MinMapqZeroDisablesFilter )
         rr.read.label("r1");
         rr.read.sites("ACGT");
         AlignmentHit hit;
-        hit.ref_id = 0; hit.ref_pos = 0; hit.mapq = 0; hit.cigar = { op(4, 7) };
+        hit.ref_id = 0; hit.ref_pos = 0; hit.mapq = 0; hit.cigar = { op(4, CigarOp::E) };
         rr.hits.push_back( hit );
         w.write( std::move(rr) );
     }
@@ -456,7 +455,7 @@ TEST( HitSelection, ScoreWindowDropsDistantHits )
         rr.read.sites("ACGT");
         for( int as : { 0, -4, -6 } ) {
             AlignmentHit hit;
-            hit.ref_id = 0; hit.ref_pos = 0; hit.cigar = { op(4, 7) }; hit.tag_as = as;
+            hit.ref_id = 0; hit.ref_pos = 0; hit.cigar = { op(4, CigarOp::E) }; hit.tag_as = as;
             rr.hits.push_back( hit );
         }
         w.write( std::move(rr) );
@@ -478,7 +477,7 @@ TEST( HitSelection, ScoreWindowBoundaryPasses )
         rr.read.sites("ACGT");
         for( int as : { 0, -5 } ) { // -5 is exactly best_as - window: 0 - 5 = -5
             AlignmentHit hit;
-            hit.ref_id = 0; hit.ref_pos = 0; hit.cigar = { op(4, 7) }; hit.tag_as = as;
+            hit.ref_id = 0; hit.ref_pos = 0; hit.cigar = { op(4, CigarOp::E) }; hit.tag_as = as;
             rr.hits.push_back( hit );
         }
         w.write( std::move(rr) );
@@ -500,7 +499,7 @@ TEST( HitSelection, ScoreWindowZeroKeepsOnlyBest )
         rr.read.sites("ACGT");
         for( int as : { 0, -1 } ) {
             AlignmentHit hit;
-            hit.ref_id = 0; hit.ref_pos = 0; hit.cigar = { op(4, 7) }; hit.tag_as = as;
+            hit.ref_id = 0; hit.ref_pos = 0; hit.cigar = { op(4, CigarOp::E) }; hit.tag_as = as;
             rr.hits.push_back( hit );
         }
         w.write( std::move(rr) );
@@ -522,7 +521,7 @@ TEST( HitSelection, ScoreWindowNegativeDisablesFilter )
         rr.read.sites("ACGT");
         for( int as : { 0, -100, -9999 } ) {
             AlignmentHit hit;
-            hit.ref_id = 0; hit.ref_pos = 0; hit.cigar = { op(4, 7) }; hit.tag_as = as;
+            hit.ref_id = 0; hit.ref_pos = 0; hit.cigar = { op(4, CigarOp::E) }; hit.tag_as = as;
             rr.hits.push_back( hit );
         }
         w.write( std::move(rr) );
@@ -546,7 +545,7 @@ TEST( HitSelection, CombinedMaxHitsAndMinMapq )
         rr.read.sites("ACGT");
         for( uint8_t mq : { 20, 35, 40, 50 } ) {
             AlignmentHit hit;
-            hit.ref_id = 0; hit.ref_pos = 0; hit.mapq = mq; hit.cigar = { op(4, 7) };
+            hit.ref_id = 0; hit.ref_pos = 0; hit.mapq = mq; hit.cigar = { op(4, CigarOp::E) };
             rr.hits.push_back( hit );
         }
         w.write( std::move(rr) );
@@ -586,7 +585,7 @@ TEST( SeparateRecords, TwoHitsSecondaryFlag )
         rr.read.sites("ACGT");
         for( int i = 0; i < 2; ++i ) {
             AlignmentHit hit;
-            hit.ref_id = 0; hit.ref_pos = i * 10; hit.cigar = { op(4, 7) };
+            hit.ref_id = 0; hit.ref_pos = i * 10; hit.cigar = { op(4, CigarOp::E) };
             rr.hits.push_back( hit );
         }
         w.write( std::move(rr) );
@@ -610,7 +609,7 @@ TEST( SeparateRecords, ThreeHitsAllSecondariesFlagged )
         rr.read.sites("ACGT");
         for( int i = 0; i < 3; ++i ) {
             AlignmentHit hit;
-            hit.ref_id = 0; hit.ref_pos = i * 10; hit.cigar = { op(4, 7) };
+            hit.ref_id = 0; hit.ref_pos = i * 10; hit.cigar = { op(4, CigarOp::E) };
             rr.hits.push_back( hit );
         }
         w.write( std::move(rr) );
@@ -635,9 +634,9 @@ TEST( SeparateRecords, SecondaryPreservesOtherFlags )
         rr.read.label("r1");
         rr.read.sites("ACGT");
         AlignmentHit primary;
-        primary.ref_id = 0; primary.ref_pos = 0; primary.cigar = { op(4, 7) };
+        primary.ref_id = 0; primary.ref_pos = 0; primary.cigar = { op(4, CigarOp::E) };
         AlignmentHit secondary;
-        secondary.ref_id = 0; secondary.ref_pos = 10; secondary.cigar = { op(4, 7) };
+        secondary.ref_id = 0; secondary.ref_pos = 10; secondary.cigar = { op(4, CigarOp::E) };
         secondary.flags = AlignmentFlags::Reverse;
         rr.hits.push_back( primary );
         rr.hits.push_back( secondary );
@@ -683,7 +682,7 @@ TEST( XaTag, MultipleHitsOnlyOnePrimaryRecord )
         rr.read.sites("ACGT");
         for( int i = 0; i < 3; ++i ) {
             AlignmentHit hit;
-            hit.ref_id = 0; hit.ref_pos = i * 10; hit.cigar = { op(4, 7) };
+            hit.ref_id = 0; hit.ref_pos = i * 10; hit.cigar = { op(4, CigarOp::E) };
             rr.hits.push_back( hit );
         }
         w.write( std::move(rr) );
@@ -704,8 +703,8 @@ TEST( XaTag, TwoHitsXaEntryFormat )
         rr.read.label("r1");
         rr.read.sites("ACGT");
         AlignmentHit h1, h2;
-        h1.ref_id = 0; h1.ref_pos = 5;  h1.cigar = { op(4, 7) };
-        h2.ref_id = 0; h2.ref_pos = 20; h2.cigar = { op(4, 7) }; h2.tag_nm = 1;
+        h1.ref_id = 0; h1.ref_pos = 5;  h1.cigar = { op(4, CigarOp::E) };
+        h2.ref_id = 0; h2.ref_pos = 20; h2.cigar = { op(4, CigarOp::E) }; h2.tag_nm = 1;
         rr.hits.push_back( h1 );
         rr.hits.push_back( h2 );
         w.write( std::move(rr) );
@@ -730,7 +729,7 @@ TEST( XaTag, MultipleSecondariesTwoEntries )
         rr.read.sites("ACGT");
         for( int i = 0; i < 3; ++i ) {
             AlignmentHit hit;
-            hit.ref_id = 0; hit.ref_pos = i * 100; hit.cigar = { op(4, 7) };
+            hit.ref_id = 0; hit.ref_pos = i * 100; hit.cigar = { op(4, CigarOp::E) };
             rr.hits.push_back( hit );
         }
         w.write( std::move(rr) );
@@ -754,8 +753,8 @@ TEST( XaTag, ReverseStrandPrefixedWithMinus )
         rr.read.label("r1");
         rr.read.sites("ACGT");
         AlignmentHit h1, h2;
-        h1.ref_id = 0; h1.ref_pos = 0;  h1.cigar = { op(4, 7) };
-        h2.ref_id = 0; h2.ref_pos = 10; h2.cigar = { op(4, 7) };
+        h1.ref_id = 0; h1.ref_pos = 0;  h1.cigar = { op(4, CigarOp::E) };
+        h2.ref_id = 0; h2.ref_pos = 10; h2.cigar = { op(4, CigarOp::E) };
         h2.flags = AlignmentFlags::Reverse;
         rr.hits.push_back( h1 );
         rr.hits.push_back( h2 );
@@ -780,8 +779,8 @@ TEST( XaTag, NmFallbackToZeroWhenAbsent )
         rr.read.label("r1");
         rr.read.sites("ACGT");
         AlignmentHit h1, h2;
-        h1.ref_id = 0; h1.ref_pos = 0;  h1.cigar = { op(4, 7) };
-        h2.ref_id = 0; h2.ref_pos = 10; h2.cigar = { op(4, 7) };
+        h1.ref_id = 0; h1.ref_pos = 0;  h1.cigar = { op(4, CigarOp::E) };
+        h2.ref_id = 0; h2.ref_pos = 10; h2.cigar = { op(4, CigarOp::E) };
         // h2.tag_nm intentionally left as nullopt
         rr.hits.push_back( h1 );
         rr.hits.push_back( h2 );
@@ -804,7 +803,7 @@ TEST( XaTag, UnmappedSecondaryUsesStarRname )
         rr.read.label("r1");
         rr.read.sites("ACGT");
         AlignmentHit h1, h2;
-        h1.ref_id = 0; h1.ref_pos = 0; h1.cigar = { op(4, 7) };
+        h1.ref_id = 0; h1.ref_pos = 0; h1.cigar = { op(4, CigarOp::E) };
         h2.ref_id = -1; // unmapped
         rr.hits.push_back( h1 );
         rr.hits.push_back( h2 );
@@ -825,7 +824,7 @@ TEST( RecordFields, QnameSeqCigar )
     {
         BamHeader hdr = make_header({{"chr1", 100}});
         BamWriter w( tmp.path, std::move(hdr), sam_settings() );
-        w.write( make_record("myread", "ACGT", 0, 5, 60, { op(2, 7), op(2, 8) }) );
+        w.write( make_record("myread", "ACGT", 0, 5, 60, { op(2, CigarOp::E), op(2, CigarOp::X) }) );
     }
     auto recs = read_sam_records( tmp.path );
     ASSERT_EQ( recs.size(), 1 );
@@ -841,7 +840,7 @@ TEST( RecordFields, RefnameAndPos )
     {
         BamHeader hdr = make_header({{"chr1", 100}, {"chr2", 200}});
         BamWriter w( tmp.path, std::move(hdr), sam_settings() );
-        w.write( make_record("r1", "ACGT", 1, 49, 60, { op(4, 7) }) );
+        w.write( make_record("r1", "ACGT", 1, 49, 60, { op(4, CigarOp::E) }) );
     }
     auto recs = read_sam_records( tmp.path );
     ASSERT_EQ( recs.size(), 1 );
@@ -856,7 +855,7 @@ TEST( RecordFields, FlagAndMapq )
     {
         BamHeader hdr = make_header({{"chr1", 100}});
         BamWriter w( tmp.path, std::move(hdr), sam_settings() );
-        w.write( make_record("r1", "ACGT", 0, 0, 37, { op(4, 7) }, AlignmentFlags::Reverse) );
+        w.write( make_record("r1", "ACGT", 0, 0, 37, { op(4, CigarOp::E) }, AlignmentFlags::Reverse) );
     }
     auto recs = read_sam_records( tmp.path );
     ASSERT_EQ( recs.size(), 1 );
@@ -901,7 +900,7 @@ TEST( RecordFields, AsTagAlwaysPresentWithCorrectValue )
     {
         BamHeader hdr = make_header({{"chr1", 100}});
         BamWriter w( tmp.path, std::move(hdr), sam_settings() );
-        w.write( make_record("r1", "ACGT", 0, 0, 60, { op(4, 7) }, 0, -7) );
+        w.write( make_record("r1", "ACGT", 0, 0, 60, { op(4, CigarOp::E) }, 0, -7) );
     }
     auto recs = read_sam_records( tmp.path );
     ASSERT_EQ( recs.size(), 1 );
@@ -1030,7 +1029,7 @@ TEST( EdgeCase, MultipleReferencesCorrectRname )
     {
         BamHeader hdr = make_header({{"chr1", 100}, {"chr2", 200}, {"chr3", 300}});
         BamWriter w( tmp.path, std::move(hdr), sam_settings() );
-        w.write( make_record("r1", "ACGT", 2, 0, 60, { op(4, 7) }) );
+        w.write( make_record("r1", "ACGT", 2, 0, 60, { op(4, CigarOp::E) }) );
     }
     auto recs = read_sam_records( tmp.path );
     ASSERT_EQ( recs.size(), 1 );
@@ -1044,7 +1043,7 @@ TEST( EdgeCase, MultipleConsecutiveWrites )
         BamHeader hdr = make_header({{"chr1", 10000}});
         BamWriter w( tmp.path, std::move(hdr), sam_settings() );
         for( int i = 0; i < 50; ++i ) {
-            w.write( make_record("r" + std::to_string(i), "ACGT", 0, i * 10, 60, { op(4, 7) }) );
+            w.write( make_record("r" + std::to_string(i), "ACGT", 0, i * 10, 60, { op(4, CigarOp::E) }) );
         }
     }
     EXPECT_EQ( read_sam_records( tmp.path ).size(), 50 );

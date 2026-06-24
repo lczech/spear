@@ -123,7 +123,7 @@ struct AlignmentHit
     /// Mapping quality (255 = not available).
     uint8_t               mapq         = 255;
 
-    /// CIGAR in BAM uint32_t RLE format (`(length << 4) | op_code`); empty for unmapped reads.
+    /// CIGAR in BAM uint32_t RLE format (`(length << 4) | CigarOp::Op`); empty for unmapped reads.
     std::vector<uint32_t> cigar;
 
     // -------------------------------------------------------------------------

@@ -71,6 +71,17 @@ static_assert(
     AlignmentFlags::Supplementary == BAM_FSUPPLEMENTARY, "AlignmentFlags::Supplementary mismatch"
 );
 
+// Verify our CigarOp constants match the htslib BAM_C* values.
+static_assert( CigarOp::M == BAM_CMATCH,     "CigarOp::M mismatch" );
+static_assert( CigarOp::I == BAM_CINS,       "CigarOp::I mismatch" );
+static_assert( CigarOp::D == BAM_CDEL,       "CigarOp::D mismatch" );
+static_assert( CigarOp::N == BAM_CREF_SKIP,  "CigarOp::N mismatch" );
+static_assert( CigarOp::S == BAM_CSOFT_CLIP, "CigarOp::S mismatch" );
+static_assert( CigarOp::H == BAM_CHARD_CLIP, "CigarOp::H mismatch" );
+static_assert( CigarOp::P == BAM_CPAD,       "CigarOp::P mismatch" );
+static_assert( CigarOp::E == BAM_CEQUAL,     "CigarOp::E mismatch" );
+static_assert( CigarOp::X == BAM_CDIFF,      "CigarOp::X mismatch" );
+
 // =================================================================================================
 //     BamHeader
 // =================================================================================================

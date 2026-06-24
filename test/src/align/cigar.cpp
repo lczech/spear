@@ -37,8 +37,7 @@
 
 using namespace spear::align;
 
-// BAM uint32_t CIGAR encoding helpers: (length << 4) | op_code
-// Op codes: 0=M 1=I 2=D 3=N 4=S 5=H 6=P 7== 8=X
+// BAM uint32_t CIGAR encoding helper: (length << 4) | CigarOp::Op
 static constexpr uint32_t op( uint32_t len, uint32_t code ) { return (len << 4) | code; }
 
 // =================================================================================================
@@ -52,15 +51,15 @@ TEST( CigarToString, Empty )
 
 TEST( CigarToString, SingleMatch )
 {
-    EXPECT_EQ( cigar_to_string( { op(8, 7) } ), "8=" );
+    EXPECT_EQ( cigar_to_string( { op(8, CigarOp::E) } ), "8=" );
 }
 
 TEST( CigarToString, AllOps )
 {
     // M I D N S H P = X
     std::vector<uint32_t> cig = {
-        op(1,0), op(2,1), op(3,2), op(4,3),
-        op(5,4), op(6,5), op(7,6), op(8,7), op(9,8)
+        op(1,CigarOp::M), op(2,CigarOp::I), op(3,CigarOp::D), op(4,CigarOp::N),
+        op(5,CigarOp::S), op(6,CigarOp::H), op(7,CigarOp::P), op(8,CigarOp::E), op(9,CigarOp::X)
     };
     EXPECT_EQ( cigar_to_string( cig ), "1M2I3D4N5S6H7P8=9X" );
 }
@@ -68,7 +67,7 @@ TEST( CigarToString, AllOps )
 TEST( CigarToString, TypicalAlignment )
 {
     // 30= 2X 5= 1I 10=
-    std::vector<uint32_t> cig = { op(30,7), op(2,8), op(5,7), op(1,1), op(10,7) };
+    std::vector<uint32_t> cig = { op(30,CigarOp::E), op(2,CigarOp::X), op(5,CigarOp::E), op(1,CigarOp::I), op(10,CigarOp::E) };
     EXPECT_EQ( cigar_to_string( cig ), "30=2X5=1I10=" );
 }
 
@@ -79,47 +78,47 @@ TEST( CigarToString, TypicalAlignment )
 TEST( EditDistanceSingleArg, PerfectMatch )
 {
     // All = ops: edit distance is 0
-    EXPECT_EQ( edit_distance_from_cigar( { op(100, 7) } ), 0 );
+    EXPECT_EQ( edit_distance_from_cigar( { op(100, CigarOp::E) } ), 0 );
 }
 
 TEST( EditDistanceSingleArg, Mismatches )
 {
     // 8= 2X 5= → 2 mismatches
-    std::vector<uint32_t> cig = { op(8,7), op(2,8), op(5,7) };
+    std::vector<uint32_t> cig = { op(8,CigarOp::E), op(2,CigarOp::X), op(5,CigarOp::E) };
     EXPECT_EQ( edit_distance_from_cigar( cig ), 2 );
 }
 
 TEST( EditDistanceSingleArg, Insertion )
 {
     // 10= 3I 5= → 3 inserted bases
-    std::vector<uint32_t> cig = { op(10,7), op(3,1), op(5,7) };
+    std::vector<uint32_t> cig = { op(10,CigarOp::E), op(3,CigarOp::I), op(5,CigarOp::E) };
     EXPECT_EQ( edit_distance_from_cigar( cig ), 3 );
 }
 
 TEST( EditDistanceSingleArg, Deletion )
 {
     // 10= 2D 5= → 2 deleted bases
-    std::vector<uint32_t> cig = { op(10,7), op(2,2), op(5,7) };
+    std::vector<uint32_t> cig = { op(10,CigarOp::E), op(2,CigarOp::D), op(5,CigarOp::E) };
     EXPECT_EQ( edit_distance_from_cigar( cig ), 2 );
 }
 
 TEST( EditDistanceSingleArg, Mixed )
 {
     // 5= 1X 3= 2I 4= 1D 6= → NM = 1+2+1 = 4
-    std::vector<uint32_t> cig = { op(5,7), op(1,8), op(3,7), op(2,1), op(4,7), op(1,2), op(6,7) };
+    std::vector<uint32_t> cig = { op(5,CigarOp::E), op(1,CigarOp::X), op(3,CigarOp::E), op(2,CigarOp::I), op(4,CigarOp::E), op(1,CigarOp::D), op(6,CigarOp::E) };
     EXPECT_EQ( edit_distance_from_cigar( cig ), 4 );
 }
 
 TEST( EditDistanceSingleArg, ThrowsOnM )
 {
-    std::vector<uint32_t> cig = { op(10, 0) };
+    std::vector<uint32_t> cig = { op(10, CigarOp::M) };
     EXPECT_THROW( edit_distance_from_cigar( cig ), std::invalid_argument );
 }
 
 TEST( EditDistanceSingleArg, ThrowsOnUnexpectedOp )
 {
-    // N(3), S(4), H(5), P(6) are all unexpected from WFA2 gap-affine
-    for( uint32_t bad : { 3u, 4u, 5u, 6u } ) {
+    // N, S, H, P are all unexpected from WFA2 gap-affine
+    for( auto bad : { CigarOp::N, CigarOp::S, CigarOp::H, CigarOp::P } ) {
         EXPECT_THROW( edit_distance_from_cigar( { op(1, bad) } ), std::invalid_argument )
             << "op code " << bad << " should throw";
     }
@@ -138,7 +137,7 @@ TEST( EditDistanceTwoSeq, XeqCigar )
     //   CIGAR:  6= 1X 1=   → NM=1
     std::string query   = "ACGTACXT";  // position 6 differs
     std::string ref_win = "ACGTACGT";
-    std::vector<uint32_t> cig = { op(6,7), op(1,8), op(1,7) };
+    std::vector<uint32_t> cig = { op(6,CigarOp::E), op(1,CigarOp::X), op(1,CigarOp::E) };
     EXPECT_EQ( edit_distance_from_cigar( cig, query, ref_win, 0 ), 1 );
     EXPECT_EQ( edit_distance_from_cigar( cig ), 1 );  // single-arg agrees
 }
@@ -148,7 +147,7 @@ TEST( EditDistanceTwoSeq, McigarPerfectMatch )
     // M CIGAR, all bases match → NM=0
     std::string query   = "ACGT";
     std::string ref_win = "ACGT";
-    std::vector<uint32_t> cig = { op(4, 0) };
+    std::vector<uint32_t> cig = { op(4, CigarOp::M) };
     EXPECT_EQ( edit_distance_from_cigar( cig, query, ref_win, 0 ), 0 );
 }
 
@@ -157,7 +156,7 @@ TEST( EditDistanceTwoSeq, McigarMismatches )
     // M CIGAR: query ACGT vs ref ACCT → 1 mismatch at position 2
     std::string query   = "ACGT";
     std::string ref_win = "ACCT";
-    std::vector<uint32_t> cig = { op(4, 0) };
+    std::vector<uint32_t> cig = { op(4, CigarOp::M) };
     EXPECT_EQ( edit_distance_from_cigar( cig, query, ref_win, 0 ), 1 );
 }
 
@@ -173,7 +172,7 @@ TEST( EditDistanceTwoSeq, McigarWithIndels )
     // NM = 0 matches + 1 insertion = 1
     std::string query   = "ACGACGT";
     std::string ref_win = "ACGCGT";
-    std::vector<uint32_t> cig = { op(3,0), op(1,1), op(3,0) };
+    std::vector<uint32_t> cig = { op(3,CigarOp::M), op(1,CigarOp::I), op(3,CigarOp::M) };
     EXPECT_EQ( edit_distance_from_cigar( cig, query, ref_win, 0 ), 1 );
 }
 
@@ -186,7 +185,7 @@ TEST( EditDistanceTwoSeq, McigarWithDeletion )
     // NM = 0 mismatches + 1 deletion = 1
     std::string query   = "ACGCGT";
     std::string ref_win = "ACGACGT";
-    std::vector<uint32_t> cig = { op(3,0), op(1,2), op(3,0) };
+    std::vector<uint32_t> cig = { op(3,CigarOp::M), op(1,CigarOp::D), op(3,CigarOp::M) };
     EXPECT_EQ( edit_distance_from_cigar( cig, query, ref_win, 0 ), 1 );
 }
 
@@ -197,7 +196,7 @@ TEST( EditDistanceTwoSeq, RefBeginOffset )
     // CIGAR: 4M, all bases match → NM=0
     std::string query   = "ACGT";
     std::string ref_win = "NNNNACGTNNN";
-    std::vector<uint32_t> cig = { op(4, 0) };
+    std::vector<uint32_t> cig = { op(4, CigarOp::M) };
     EXPECT_EQ( edit_distance_from_cigar( cig, query, ref_win, 4 ), 0 );
 }
 
@@ -207,14 +206,14 @@ TEST( EditDistanceTwoSeq, RefBeginOffsetWithMismatch )
     // query: "ACXT", ref_window: "NNNNACGTNNN" → position 2: X vs G → 1 mismatch
     std::string query   = "ACXT";
     std::string ref_win = "NNNNACGTNNN";
-    std::vector<uint32_t> cig = { op(4, 0) };
+    std::vector<uint32_t> cig = { op(4, CigarOp::M) };
     EXPECT_EQ( edit_distance_from_cigar( cig, query, ref_win, 4 ), 1 );
 }
 
 TEST( EditDistanceTwoSeq, ThrowsOnUnexpectedOp )
 {
     std::string q = "ACGT", r = "ACGT";
-    for( uint32_t bad : { 3u, 4u, 5u, 6u } ) {
+    for( auto bad : { CigarOp::N, CigarOp::S, CigarOp::H, CigarOp::P } ) {
         EXPECT_THROW( edit_distance_from_cigar( { op(1, bad) }, q, r, 0 ), std::invalid_argument )
             << "op code " << bad << " should throw";
     }

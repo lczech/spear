@@ -22,6 +22,7 @@
 */
 
 #include "spear/align/wfa2.hpp"
+#include "spear/align/cigar.hpp"
 
 #include <stdexcept>
 
@@ -234,8 +235,8 @@ Wfa2Result Wfa2Aligner::align_cigar( std::string const& query, std::string const
     int       cigar_length = 0;
     cigar_get_CIGAR( cig, impl_->settings.use_extended_cigar, &cigar_buffer, &cigar_length );
 
-    // WFA2 names its ops from the pattern-matching convention (transform pattern→text), which
-    // is the opposite of SAM (transform reference→query). In WFA2's output:
+    // WFA2 names its ops from the pattern-matching convention (transform pattern into text),
+    // which is the opposite of SAM (transform reference→query). In WFA2's output:
     //   op 1 ("I") = text/reference consumes without pattern/query  (= SAM D)
     //   op 2 ("D") = pattern/query consumes without text/reference  (= SAM I)
     // In the glocal/fitting mode (text_begin_free=tlen, text_end_free=tlen), unaligned
@@ -247,50 +248,50 @@ Wfa2Result Wfa2Aligner::align_cigar( std::string const& query, std::string const
     //   3. Trim trailing op-2 (post-swap) runs from the output → they were the trailing clips.
     //   4. Sanity-check query_span == qlen and ref_end == cig->end_h - trailing_clip_len.
     //
-    // BAM op codes: 0=M 1=I 2=D 3=N 4=S 5=H 6=P 7== 8=X
-    // WFA2 gap-affine only emits 0, 1, 2, 7, 8; others indicate a bug.
+    // WFA2 gap-affine only emits M(0), I(1), D(2), E(7), X(8); others indicate a bug.
+    // Note: WFA2's I(1) and D(2) are swapped vs SAM convention; see Step 2 below.
 
     int const qlen = static_cast<int>( query.size() );
     int ref_begin  = 0;
     int ref_span   = 0;
     int query_span = 0;
-    int i          = 0;
+    int cur_op_idx = 0;
 
-    // Step 1: count leading op-1 (WFA2-I = SAM-D = free-end reference clips before alignment)
-    while( i < cigar_length && (cigar_buffer[i] & 0xF) == 1 ) {
-        ref_begin += static_cast<int>( cigar_buffer[i] >> 4 );
-        ++i;
+    // Step 1: count leading WFA2-I ops (= SAM-D, free-end reference clips before alignment)
+    while( cur_op_idx < cigar_length && (cigar_buffer[cur_op_idx] & 0xF) == CigarOp::I ) {
+        ref_begin += static_cast<int>( cigar_buffer[cur_op_idx] >> 4 );
+        ++cur_op_idx;
     }
 
     // Step 2: process remaining ops — swap I↔D, track ref/query span, copy to output vector
     std::vector<uint32_t> cigar;
-    cigar.reserve( static_cast<size_t>( cigar_length - i ));
-    for( ; i < cigar_length; ++i ) {
-        uint32_t op  = cigar_buffer[i] & 0xF;
-        uint32_t len = cigar_buffer[i] >> 4;
+    cigar.reserve( static_cast<size_t>( cigar_length - cur_op_idx ));
+    for( ; cur_op_idx < cigar_length; ++cur_op_idx ) {
+        uint32_t op  = cigar_buffer[cur_op_idx] & 0xF;
+        uint32_t len = cigar_buffer[cur_op_idx] >> 4;
 
         // Swap WFA2 convention → SAM convention
-        if( op == 1 ) {
-            op = 2;  // WFA2-I (ref-consuming) → SAM D
-        } else if( op == 2 ) {
-            op = 1;  // WFA2-D (query-consuming) → SAM I
-        } else if( op != 0 && op != 7 && op != 8 ) {
+        if( op == CigarOp::I ) {
+            op = CigarOp::D;  // WFA2-I (ref-consuming) → SAM D
+        } else if( op == CigarOp::D ) {
+            op = CigarOp::I;  // WFA2-D (query-consuming) → SAM I
+        } else if( op != CigarOp::M && op != CigarOp::E && op != CigarOp::X ) {
             throw std::logic_error( "wfa2: unexpected CIGAR op code " + std::to_string( op ));
         }
 
-        // SAM: M(0), D(2), =(7), X(8) consume reference; M(0), I(1), =(7), X(8) consume query
-        if( op == 0 || op == 2 || op == 7 || op == 8 ) {
+        // SAM: M, D, E, X consume reference; M, I, E, X consume query
+        if( op == CigarOp::M || op == CigarOp::D || op == CigarOp::E || op == CigarOp::X ) {
             ref_span   += static_cast<int>( len );
         }
-        if( op == 0 || op == 1 || op == 7 || op == 8 ) {
+        if( op == CigarOp::M || op == CigarOp::I || op == CigarOp::E || op == CigarOp::X ) {
             query_span += static_cast<int>( len );
         }
 
         cigar.push_back( (len << 4) | op );
     }
 
-    // Step 3: trim trailing SAM-D (op 2) ops — these were WFA2-I trailing reference clips
-    while( !cigar.empty() && (cigar.back() & 0xF) == 2 ) {
+    // Step 3: trim trailing SAM-D ops — these were WFA2-I trailing reference clips
+    while( !cigar.empty() && (cigar.back() & 0xF) == CigarOp::D ) {
         ref_span -= static_cast<int>( cigar.back() >> 4 );
         cigar.pop_back();
     }

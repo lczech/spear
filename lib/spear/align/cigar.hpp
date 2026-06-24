@@ -33,18 +33,38 @@
 namespace spear::align {
 
 // =================================================================================================
+//     CigarOp
+// =================================================================================================
+
+/**
+ * @brief BAM/SAM CIGAR operation codes.
+ *
+ * Each uint32_t CIGAR element encodes one run as `(length << 4) | op_code`.
+ */
+namespace CigarOp {
+    // Static assertions in bam_writer.cpp verify at compile time that these values
+    // agree with the htslib BAM_C* constants.
+    enum Op : uint32_t {
+        M = 0, ///< Alignment match (sequence match or mismatch).
+        I = 1, ///< Insertion to the reference.
+        D = 2, ///< Deletion from the reference.
+        N = 3, ///< Skipped region from the reference.
+        S = 4, ///< Soft clipping (bases present in SEQ).
+        H = 5, ///< Hard clipping (bases absent from SEQ).
+        P = 6, ///< Padding (silent deletion from padded reference).
+        E = 7, ///< Sequence match.
+        X = 8, ///< Sequence mismatch.
+    };
+} // namespace CigarOp
+
+// =================================================================================================
 //     CIGAR utilities
 // =================================================================================================
 
 /**
  * @brief Convert a CIGAR vector to its SAM text form (e.g. "36M2I5D").
  *
- * Each uint32_t element encodes one run as `(length << 4) | op_code`, where op codes are:
- *
- * ```
- * 0=M  1=I  2=D  3=N  4=S  5=H  6=P  7==  8=X
- * ```
- *
+ * Each uint32_t element encodes one run as `(length << 4) | CigarOp::Op`.
  * This is the binary BAM CIGAR format, also used by WFA2's cigar_t::cigar_buffer.
  */
 inline std::string cigar_to_string( std::vector<uint32_t> const& cigar )
@@ -70,21 +90,20 @@ inline std::string cigar_to_string( std::vector<uint32_t> const& cigar )
  */
 inline int edit_distance_from_cigar( std::vector<uint32_t> const& cigar )
 {
-    // BAM op codes: 0=M 1=I 2=D 3=N 4=S 5=H 6=P 7== 8=X
     int dist = 0;
     for( uint32_t const c : cigar ) {
         uint32_t const op  = c & 0xF;
         uint32_t const len = c >> 4;
-        if( op == 7 ) { // =: sequence match, no contribution
+        if( op == CigarOp::E ) { // sequence match, no contribution
             (void) len;
-        } else if( op == 8 || op == 1 || op == 2 ) { // X, I, D: contribute to edit distance
+        } else if( op == CigarOp::X || op == CigarOp::I || op == CigarOp::D ) {
             dist += static_cast<int>( len );
-        } else if( op == 0 ) { // M: ambiguous, cannot compute edit distance without sequences
+        } else if( op == CigarOp::M ) { // ambiguous, cannot compute edit distance without sequences
             throw std::invalid_argument(
                 "edit_distance_from_cigar: M op requires sequence context; "
                 "use the two-sequence overload or set use_extended_cigar = true"
             );
-        } else { // N(3), S(4), H(5), P(6): unexpected in gap-affine alignment output
+        } else { // N, S, H, P: unexpected in gap-affine alignment output
             throw std::invalid_argument(
                 "edit_distance_from_cigar: unexpected CIGAR op code " + std::to_string( op )
             );
@@ -113,27 +132,26 @@ inline int edit_distance_from_cigar(
     std::string_view              ref_window,
     int                           ref_begin
 ) {
-    // BAM op codes: 0=M 1=I 2=D 3=N 4=S 5=H 6=P 7== 8=X
     int dist  = 0;
     int q_pos = 0;
     int r_pos = ref_begin;
     for( uint32_t const c : cigar ) {
         uint32_t const op  = c & 0xF;
         int      const len = static_cast<int>( c >> 4 );
-        if( op == 7 ) { // =: sequence match
+        if( op == CigarOp::E ) { // sequence match
             q_pos += len;
             r_pos += len;
-        } else if( op == 8 ) { // X: sequence mismatch
+        } else if( op == CigarOp::X ) { // sequence mismatch
             dist  += len;
             q_pos += len;
             r_pos += len;
-        } else if( op == 1 ) { // I: insertion in query
+        } else if( op == CigarOp::I ) { // insertion in query
             dist  += len;
             q_pos += len;
-        } else if( op == 2 ) { // D: deletion from query
+        } else if( op == CigarOp::D ) { // deletion from query
             dist  += len;
             r_pos += len;
-        } else if( op == 0 ) { // M: compare sequences to resolve matches vs mismatches
+        } else if( op == CigarOp::M ) { // compare sequences to resolve matches vs mismatches
             for( int i = 0; i < len; ++i ) {
                 if( query[q_pos] != ref_window[r_pos] ) {
                     ++dist;
@@ -141,7 +159,7 @@ inline int edit_distance_from_cigar(
                 ++q_pos;
                 ++r_pos;
             }
-        } else { // N(3), S(4), H(5), P(6): unexpected in gap-affine alignment output
+        } else { // N, S, H, P: unexpected in gap-affine alignment output
             throw std::invalid_argument(
                 "edit_distance_from_cigar: unexpected CIGAR op code " + std::to_string( op )
             );
