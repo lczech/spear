@@ -41,6 +41,10 @@ else()
     )
     # Use Populate (not MakeAvailable) to download without processing WFA2's own
     # CMakeLists.txt, which defines wfa2_static and would collide with ours below.
+    # CMP0169 deprecated direct FetchContent_Populate in CMake 3.30; suppress the warning.
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.30")
+        cmake_policy(SET CMP0169 OLD)
+    endif()
     FetchContent_GetProperties(wfa2)
     if(NOT wfa2_POPULATED)
         FetchContent_Populate(wfa2)
