@@ -39,8 +39,13 @@ else()
         GIT_TAG        "${wfa2_GIT_TAG}"
         SOURCE_DIR     "${CMAKE_BINARY_DIR}/deps/wfa2"
     )
-    FetchContent_MakeAvailable(wfa2)
-    set(WFA2_SOURCE     "${CMAKE_BINARY_DIR}/deps/wfa2")
+    # Use Populate (not MakeAvailable) to download without processing WFA2's own
+    # CMakeLists.txt, which defines wfa2_static and would collide with ours below.
+    FetchContent_GetProperties(wfa2)
+    if(NOT wfa2_POPULATED)
+        FetchContent_Populate(wfa2)
+    endif()
+    set(WFA2_SOURCE     "${wfa2_SOURCE_DIR}")
     set(WFA2_PARENT_DIR "${CMAKE_BINARY_DIR}/deps")
 endif()
 
