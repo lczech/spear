@@ -80,9 +80,10 @@ void run_version( VersionOptions const& options )
 
     LOG_BOLD << spear_header();
     LOG_BOLD;
-    LOG_BOLD << "spear version: " << spear_version();
-    LOG_BOLD;
+    // LOG_BOLD << "spear version: " << spear_version();
+    // LOG_BOLD;
     LOG_BOLD << genesis::util::core::info_print_compiler();
+    LOG_BOLD;
     LOG_BOLD << genesis::util::core::info_print_hardware();
     LOG_BOLD;
     LOG_BOLD << "For citation information, call  `spear tools citation`";
