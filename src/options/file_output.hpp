@@ -26,6 +26,8 @@
 
 #include "CLI/CLI.hpp"
 
+#include "tools/cli_option.hpp"
+
 #include "genesis/util/io/output_target.hpp"
 
 #include <string>
@@ -141,8 +143,7 @@ private:
         CLI::App* sub,
         std::string const& initial_value,
         std::string const& fixname,
-        CLI::Option* target_opt,
-        std::string& target_var
+        CliOption<std::string>& target
     );
 
 public:
@@ -167,26 +168,6 @@ public:
     std::string const& group() const
     {
         return group_;
-    }
-
-    std::string const& out_dir() const
-    {
-        return out_dir_;
-    }
-
-    std::string const& prefix() const
-    {
-        return prefix_;
-    }
-
-    std::string const& suffix() const
-    {
-        return suffix_;
-    }
-
-    bool compress() const
-    {
-        return compress_;
     }
 
     // -------------------------------------------------------------------------
@@ -225,25 +206,18 @@ public:
     //     Option Members
     // -------------------------------------------------------------------------
 
-private:
-
-    // Basics that have to be set before adding actual options.
-    std::string optionname_ = "";
-    std::string group_ = "Output";
-
-    // Storage for the option values.
-    std::string out_dir_ = ".";
-    std::string prefix_;
-    std::string suffix_;
-    bool compress_ = false;
-
 public:
 
-    // Option instances.
-    CLI::Option* out_dir_option = nullptr;
-    CLI::Option* prefix_option = nullptr;
-    CLI::Option* suffix_option = nullptr;
-    CLI::Option* compress_option = nullptr;
+    CliOption<std::string> out_dir  = ".";
+    CliOption<std::string> prefix;
+    CliOption<std::string> suffix;
+    CliOption<bool>        compress = false;
+
+private:
+
+    // Internal config; must be set before any add_*_opt_to_app() calls.
+    std::string optionname_ = "";
+    std::string group_ = "Output";
 
 };
 

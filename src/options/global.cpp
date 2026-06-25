@@ -38,12 +38,12 @@ void GlobalOptions::initialize( int const argc, char const* const* argv )
     using namespace genesis::util::core;
 
     // By default, use the hardware threads, taking hypterthreding into account
-    opt_threads.value = guess_number_of_threads();
+    threads.value = guess_number_of_threads();
 
     // If hardware value is not available, just use 1 thread.
     // This is executed if the call to the above function fails.
-    if( opt_threads.value == 0 ) {
-        opt_threads.value = 1;
+    if( threads.value == 0 ) {
+        threads.value = 1;
     }
 
     // Set verbosity to max, just in case.
@@ -66,41 +66,41 @@ void GlobalOptions::add_to_module( CLI::App& module )
 void GlobalOptions::add_to_subcommand( CLI::App& subcommand )
 {
     // Allow to overwrite files.
-    opt_allow_file_overwriting = subcommand.add_flag(
+    allow_file_overwriting = subcommand.add_flag(
         // "--allow-file-overwriting",
         allow_file_overwriting_flag,
-        opt_allow_file_overwriting.value,
+        allow_file_overwriting.value,
         "Allow to overwrite existing output files instead of aborting the command. "
         "By default, we abort if any output file already exists, to avoid overwriting by mistake."
     );
-    opt_allow_file_overwriting.option->group( "Global Options" );
+    allow_file_overwriting.option->group( "Global Options" );
 
     // Verbosity
-    opt_verbose = subcommand.add_flag(
+    verbose = subcommand.add_flag(
         "--verbose",
-        opt_verbose.value,
+        verbose.value,
         "Produce more verbose output."
     );
-    opt_verbose.option->group( "Global Options" );
+    verbose.option->group( "Global Options" );
 
     // Threads
-    opt_threads = subcommand.add_option(
+    threads = subcommand.add_option(
         "--threads",
-        opt_threads.value,
+        threads.value,
         "Number of threads to use for calculations. If not set, we guess a reasonable number of "
         "threads, by looking at the environmental variables (1) `OMP_NUM_THREADS` (OpenMP) and "
         "(2) `SLURM_CPUS_PER_TASK` (slurm), as well as (3) the hardware concurrency (number of "
         "CPU cores), taking hyperthreads into account, in the given order of precedence."
     );
-    opt_threads.option->group( "Global Options" );
+    threads.option->group( "Global Options" );
 
     // Log File
-    opt_log_file = subcommand.add_option(
+    log_file = subcommand.add_option(
         "--log-file",
-        opt_log_file.value,
+        log_file.value,
         "Write all output to a log file, in addition to standard output to the terminal."
     );
-    opt_log_file.option->group( "Global Options" );
+    log_file.option->group( "Global Options" );
 
     // TODO add random seed option
 }
@@ -114,35 +114,35 @@ void GlobalOptions::run_global()
     using namespace genesis::util::core;
 
     // If user did not provide number, use hardware value (taking care of hyperthreads as well).
-    if( opt_threads.value == 0 ) {
-        opt_threads.value = guess_number_of_threads();
+    if( threads.value == 0 ) {
+        threads.value = guess_number_of_threads();
     }
 
     // If hardware value is not available, just use 1 thread.
     // This is executed if the call above fails.
-    if( opt_threads.value == 0 ) {
-        opt_threads.value = 1;
+    if( threads.value == 0 ) {
+        threads.value = 1;
     }
 
     // Initialize the global thread pool. It uses one fewer than the number of specified thread
     // here, as we need to acount for the main thread doing work as well. We have implemented
     // a type of proactive future that also does work from the pool when waiting for results,
     // meaning that the main thread will also participate in the pool.
-    Options::get().init_global_thread_pool( opt_threads.value, opt_threads.value * 4 );
+    Options::get().init_global_thread_pool( threads.value, threads.value * 4 );
 
     // Allow to overwrite files. Has to be done before adding the log file (coming below),
     // as this might already fail if the log file exists.
-    if( opt_allow_file_overwriting.value ) {
+    if( allow_file_overwriting.value ) {
         Options::get().allow_file_overwriting( true );
     }
 
     // Set log file.
-    if( ! opt_log_file.value.empty() ) {
-        Logging::log_to_file( opt_log_file.value );
+    if( ! log_file.value.empty() ) {
+        Logging::log_to_file( log_file.value );
     }
 
     // Set verbosity level for logging output.
-    if( opt_verbose.value ) {
+    if( verbose.value ) {
         Logging::max_level( Logging::LoggingLevel::kMessage2 );
     } else {
         Logging::max_level( Logging::LoggingLevel::kMessage1 );

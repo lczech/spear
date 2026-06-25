@@ -39,20 +39,20 @@
 struct MapIndexOptions
 {
     // Input
-    CliOption<std::string> opt_fasta = "";
+    CliOption<std::string> fasta = "";
 
     // Settings
-    CliOption<size_t>      opt_k = 16;
-    CliOption<bool>        opt_canonical = false;
-    CliOption<size_t>      opt_max_occurrences_per_kmer = 0;
-    CliOption<size_t>      opt_genome_bin_width = 128;
+    CliOption<size_t>      k = 16;
+    CliOption<bool>        canonical = false;
+    CliOption<size_t>      max_occurrences_per_kmer = 0;
+    CliOption<size_t>      genome_bin_width = 128;
 
     // Performance
-    CliOption<size_t>      opt_pending_capacity = 16;
-    CliOption<size_t>      opt_position_bits = 32;
+    CliOption<size_t>      pending_capacity = 16;
+    CliOption<size_t>      position_bits = 32;
 
     // Output
-    FileOutputOptions      opt_output;
+    FileOutputOptions      output;
 };
 
 // =================================================================================================

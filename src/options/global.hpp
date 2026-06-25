@@ -105,10 +105,10 @@ public:
     //     Option Members
     // -------------------------------------------------------------------------
 
-    CliOption<bool>        opt_verbose = false;
-    CliOption<size_t>      opt_threads = 0;
-    CliOption<std::string> opt_log_file = "";
-    CliOption<bool>        opt_allow_file_overwriting = false;
+    CliOption<bool>        verbose = false;
+    CliOption<size_t>      threads = 0;
+    CliOption<std::string> log_file = "";
+    CliOption<bool>        allow_file_overwriting = false;
 
 private:
 

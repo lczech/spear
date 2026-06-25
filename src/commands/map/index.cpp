@@ -66,89 +66,89 @@ void setup_map_index( CLI::App& app )
     // -------------------------------------------------------------------
 
     // Input fasta file.
-    options->opt_fasta = sub->add_option(
+    options->fasta = sub->add_option(
         "--fasta",
-        options->opt_fasta.value,
+        options->fasta.value,
         "Input reference genome in fasta or fasta.gz format to build the index from."
     );
-    options->opt_fasta.option->check( CLI::ExistingFile );
-    options->opt_fasta.option->required();
-    options->opt_fasta.option->group( "Input" );
+    options->fasta.option->check( CLI::ExistingFile );
+    options->fasta.option->required();
+    options->fasta.option->group( "Input" );
 
     // -------------------------------------------------------------------
     //     Settings
     // -------------------------------------------------------------------
 
     // K-mer size.
-    options->opt_k = sub->add_option(
+    options->k = sub->add_option(
         "--k",
-        options->opt_k.value,
+        options->k.value,
         "Size of the k-mers."
     );
-    options->opt_k.option->check( CLI::Range( size_t{1}, size_t{31} ));
-    options->opt_k.option->group( "Settings" );
+    options->k.option->check( CLI::Range( size_t{1}, size_t{31} ));
+    options->k.option->group( "Settings" );
 
     // Canonical k-mers.
-    options->opt_canonical = sub->add_flag(
+    options->canonical = sub->add_flag(
         "--canonical",
-        options->opt_canonical.value,
+        options->canonical.value,
         "Index canonical k-mers (the lexicographically/numerically smaller of a k-mer and its "
         "reverse complement), halving the number of distinct terms. If not set, k-mers are "
         "indexed as-is, and reverse-complement matches need to be found by separately querying "
         "the reverse complement k-mers of a read against the index."
     );
-    options->opt_canonical.option->group( "Settings" );
+    options->canonical.option->group( "Settings" );
 
     // Max occurrences per k-mer.
-    options->opt_max_occurrences_per_kmer = sub->add_option(
+    options->max_occurrences_per_kmer = sub->add_option(
         "--max-occurrences-per-kmer",
-        options->opt_max_occurrences_per_kmer.value,
+        options->max_occurrences_per_kmer.value,
         "Maximum number of occurrences to keep per k-mer. If a k-mer occurs more often than this, "
         "all its occurrences are discarded. The default value of 0 means no limit."
     );
-    options->opt_max_occurrences_per_kmer.option->group( "Settings" );
+    options->max_occurrences_per_kmer.option->group( "Settings" );
 
     // Genome bin width.
-    options->opt_genome_bin_width = sub->add_option(
+    options->genome_bin_width = sub->add_option(
         "--genome-bin-width",
-        options->opt_genome_bin_width.value,
+        options->genome_bin_width.value,
         "Width of the bins (in bases) that genome positions are grouped into for the occurrences."
     );
-    options->opt_genome_bin_width.option->check( CLI::PositiveNumber );
-    options->opt_genome_bin_width.option->group( "Settings" );
+    options->genome_bin_width.option->check( CLI::PositiveNumber );
+    options->genome_bin_width.option->group( "Settings" );
 
     // -------------------------------------------------------------------
     //     Performance
     // -------------------------------------------------------------------
 
     // Pending capacity.
-    options->opt_pending_capacity = sub->add_option(
+    options->pending_capacity = sub->add_option(
         "--pending-capacity",
-        options->opt_pending_capacity.value,
+        options->pending_capacity.value,
         "Number of pending positions buffered per k-mer before they are flushed into the index. "
         "Higher values increase memory usage but speed up indexing. "
     );
-    options->opt_pending_capacity.option->check( CLI::NonNegativeNumber );
-    options->opt_pending_capacity.option->group( "Performance" );
+    options->pending_capacity.option->check( CLI::NonNegativeNumber );
+    options->pending_capacity.option->group( "Performance" );
 
     // Position bits. Hidden, as this is a low-level detail that most users will not need.
-    options->opt_position_bits = sub->add_option(
+    options->position_bits = sub->add_option(
         "--position-bits",
-        options->opt_position_bits.value,
+        options->position_bits.value,
         "Number of bits used to store genome bin positions in the index, either 32 or 64. "
         "32 bits suffice for reference genomes of up to about 550 Gbp (with the default "
         "genome bin width); use 64 only for substantially larger references."
     );
-    options->opt_position_bits.option->check( CLI::IsMember( std::vector<size_t>{ 32, 64 } ));
-    options->opt_position_bits.option->group( "" );
+    options->position_bits.option->check( CLI::IsMember( std::vector<size_t>{ 32, 64 } ));
+    options->position_bits.option->group( "" );
 
     // -------------------------------------------------------------------
     //     Output
     // -------------------------------------------------------------------
 
     // Output options.
-    options->opt_output.set_group( "Output" );
-    options->opt_output.add_default_output_opts_to_app( sub );
+    options->output.set_group( "Output" );
+    options->output.add_default_output_opts_to_app( sub );
 
     // Set the run function as callback to be called when this subcommand is issued.
     // Hand over the options by copy, so that their shared ptr stays alive in the lambda.
@@ -185,14 +185,14 @@ void run_map_index_impl( MapIndexOptions const& options )
 
     // Check that none of our output files already exist, unless overwriting is allowed,
     // before running any expensive computations.
-    options.opt_output.check_output_files_nonexistence(
+    options.output.check_output_files_nonexistence(
         std::string( "map-index" ), std::vector<std::string>{ "sidx", "json" }
     );
 
     // Prepare param shorthands.
-    auto const k = static_cast<uint8_t>( options.opt_k.value );
-    auto const w = options.opt_genome_bin_width.value;
-    auto const canonical = options.opt_canonical.value;
+    auto const k = static_cast<uint8_t>( options.k.value );
+    auto const w = options.genome_bin_width.value;
+    auto const canonical = options.canonical.value;
 
     // Determine the number of distinct terms (k-mers) that we index.
     std::size_t const num_term_indices = canonical
@@ -203,9 +203,9 @@ void run_map_index_impl( MapIndexOptions const& options )
     // Set up the inverted index builder.
     using Builder = spear::inverted_index::InvertedIndexBuilder<PositionT>;
     typename Builder::Config builder_config;
-    builder_config.pending_capacity = options.opt_pending_capacity.value;
+    builder_config.pending_capacity = options.pending_capacity.value;
     builder_config.max_postings_per_term = static_cast<typename Builder::stored_count_type>(
-        options.opt_max_occurrences_per_kmer.value
+        options.max_occurrences_per_kmer.value
     );
     Builder builder( num_term_indices, builder_config );
 
@@ -237,7 +237,7 @@ void run_map_index_impl( MapIndexOptions const& options )
     // the concatenated coordinate space that the index positions refer to.
     std::size_t total_length = 0;
     std::size_t sequence_count = 0;
-    auto fasta_input = FastaInputStream( io::from_file( options.opt_fasta.value ));
+    auto fasta_input = FastaInputStream( io::from_file( options.fasta.value ));
     fasta_input.reader().validate_labels( false );
     for( auto& sequence : fasta_input ) {
         ++sequence_count;
@@ -298,11 +298,11 @@ void run_map_index_impl( MapIndexOptions const& options )
     // -------------------------------------------------------------------
 
     // Make sure that the output directory exists before we write any files into it.
-    genesis::util::core::dir_create( options.opt_output.out_dir() );
+    genesis::util::core::dir_create( options.output.out_dir );
 
     // Write the inverted index itself. We do not need to call builder.finalize() here,
     // as write() already flushes all pending data as part of its single pass over the entries.
-    auto const index_path = options.opt_output.get_output_filename( "map-index", "sidx" );
+    auto const index_path = options.output.get_output_filename( "map-index", "sidx" );
     auto const stats = builder.write( index_path );
     LOG_MSG
         << "Wrote index to " << index_path << " (" << stats.total_blob_bytes << " bytes of "
@@ -328,24 +328,24 @@ void run_map_index_impl( MapIndexOptions const& options )
 
     // Write the json metadata file, describing the index and the reference it was built from.
     auto doc = genesis::util::format::JsonDocument::object();
-    doc["fasta"] = genesis::util::format::JsonDocument::string( options.opt_fasta.value );
+    doc["fasta"] = genesis::util::format::JsonDocument::string( options.fasta.value );
     doc["index_file"] = genesis::util::format::JsonDocument::string( index_path );
     doc["k"] = genesis::util::format::JsonDocument::number_unsigned( k );
     doc["canonical"] = genesis::util::format::JsonDocument::boolean( canonical );
     doc["genome_bin_width"] = genesis::util::format::JsonDocument::number_unsigned( w );
     // doc["pending_capacity"] = genesis::util::format::JsonDocument::number_unsigned(
-    //     options.opt_pending_capacity.value
+    //     options.pending_capacity.value
     // );
     doc["max_occurrences_per_kmer"] = genesis::util::format::JsonDocument::number_unsigned(
-        options.opt_max_occurrences_per_kmer.value
+        options.max_occurrences_per_kmer.value
     );
     doc["position_bits"] = genesis::util::format::JsonDocument::number_unsigned(
-        options.opt_position_bits.value
+        options.position_bits.value
     );
     doc["total_genome_length"] = genesis::util::format::JsonDocument::number_unsigned( total_length );
     doc["sequences"] = std::move( sequences_json );
 
-    auto const json_target = options.opt_output.get_output_target( "map-index", "json" );
+    auto const json_target = options.output.get_output_target( "map-index", "json" );
     genesis::util::format::JsonWriter().write( doc, json_target );
 }
 
@@ -353,7 +353,7 @@ void run_map_index_impl( MapIndexOptions const& options )
 
 void run_map_index( MapIndexOptions const& options )
 {
-    if( options.opt_position_bits.value == 64 ) {
+    if( options.position_bits.value == 64 ) {
         run_map_index_impl<std::uint64_t>( options );
     } else {
         run_map_index_impl<std::uint32_t>( options );

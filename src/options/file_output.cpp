@@ -44,7 +44,7 @@
 void FileOutputOptions::set_optionname( std::string const& optionname )
 {
     internal_check(
-        ! out_dir_option && ! prefix_option && ! suffix_option && ! compress_option,
+        ! out_dir.option && ! prefix.option && ! suffix.option && ! compress.option,
         "Have to call set_optionname() before adding any option."
     );
     optionname_ = optionname;
@@ -53,7 +53,7 @@ void FileOutputOptions::set_optionname( std::string const& optionname )
 void FileOutputOptions::set_group( std::string const& group )
 {
     internal_check(
-        ! out_dir_option && ! prefix_option && ! suffix_option && ! compress_option,
+        ! out_dir.option && ! prefix.option && ! suffix.option && ! compress.option,
         "Have to call set_group() before adding any option."
     );
     group_ = group;
@@ -80,69 +80,68 @@ CLI::Option* FileOutputOptions::add_output_dir_opt_to_app(
 ) {
     // Correct setup check.
     internal_check(
-        out_dir_option == nullptr,
+        out_dir.option == nullptr,
         "Cannot use the same FileOutputOptions object multiple times."
     );
 
     // Setup.
     auto const optname = "--" + optionname_ + ( optionname_.empty() ? "" : "-" ) + "out-dir";
-    out_dir_ = initial_value;
+    out_dir.value = initial_value;
 
     // Add option
-    out_dir_option = sub->add_option(
+    out_dir = sub->add_option(
         optname,
-        out_dir_,
+        out_dir.value,
         "Directory to write " + optionname_ + ( optionname_.empty() ? "" : " " ) + "files to"
     );
-    // out_dir_option->check( CLI::ExistingDirectory );
-    out_dir_option->group( group_ );
+    // out_dir.option->check( CLI::ExistingDirectory );
+    out_dir.option->group( group_ );
 
-    return out_dir_option;
+    return out_dir.option;
 }
 
 CLI::Option* FileOutputOptions::add_file_prefix_opt_to_app(
     CLI::App* sub,
     std::string const& initial_value
 ) {
-    return add_filefix_opt_( sub, initial_value, "prefix", prefix_option, prefix_ );
+    return add_filefix_opt_( sub, initial_value, "prefix", prefix );
 }
 
 CLI::Option* FileOutputOptions::add_file_suffix_opt_to_app(
     CLI::App* sub,
     std::string const& initial_value
 ) {
-    return add_filefix_opt_( sub, initial_value, "suffix", suffix_option, suffix_ );
+    return add_filefix_opt_( sub, initial_value, "suffix", suffix );
 }
 
 CLI::Option* FileOutputOptions::add_filefix_opt_(
     CLI::App* sub,
     std::string const& initial_value,
     std::string const& fixname,
-    CLI::Option* target_opt,
-    std::string& target_var
+    CliOption<std::string>& target
 ) {
     using namespace genesis::util::core;
     using namespace genesis::util::io;
 
     // Correct setup check.
     internal_check(
-        target_opt == nullptr,
+        target.option == nullptr,
         "Cannot use the same FileOutputOptions object multiple times."
     );
 
     // Setup.
     auto const optname = "--" + optionname_ + ( optionname_.empty() ? "" : "-" ) + "file-" + fixname;
-    target_var = initial_value;
+    target.value = initial_value;
 
     // Add option
-    target_opt = sub->add_option(
+    target = sub->add_option(
         optname,
-        target_var,
+        target.value,
         "File " + fixname + " for " + ( optionname_.empty() ? "output" : optionname_ ) + " files. "
         "Most spear commands use the command name as the base name for file output. "
         "This option amends the base name, to distinguish runs with different data."
     );
-    target_opt->check([fixname]( std::string const& fix ){
+    target.option->check([fixname]( std::string const& fix ){
         if( ! is_valid_filename( fix ) ) {
             return std::string(
                 "File " + fixname + " contains invalid characters (`<>:\"\\/|?*`), non-printable " +
@@ -151,9 +150,9 @@ CLI::Option* FileOutputOptions::add_filefix_opt_(
         }
         return std::string();
     });
-    target_opt->group( group_ );
+    target.option->group( group_ );
 
-    return target_opt;
+    return target.option;
 }
 
 CLI::Option* FileOutputOptions::add_file_compress_opt_to_app(
@@ -161,7 +160,7 @@ CLI::Option* FileOutputOptions::add_file_compress_opt_to_app(
 ) {
     // Correct setup check.
     internal_check(
-        compress_option == nullptr,
+        compress.option == nullptr,
         "Cannot use the same FileOutputOptions object multiple times."
     );
 
@@ -172,14 +171,14 @@ CLI::Option* FileOutputOptions::add_file_compress_opt_to_app(
     // "block" or "multithreaded" or "parallelized" keyword --> make this a hidden option?
 
     // Add option
-    compress_option = sub->add_flag(
+    compress = sub->add_flag(
         optname,
-        compress_,
+        compress.value,
         "If set, compress the " + ( optionname_.empty() ? "output" : optionname_ ) +
         " files using gzip. Output file extensions are automatically extended by `.gz`."
     );
-    compress_option->group( group_ );
-    return compress_option;
+    compress.option->group( group_ );
+    return compress.option;
 }
 
 // =================================================================================================
@@ -193,11 +192,11 @@ std::string FileOutputOptions::get_output_filename(
     // so that empty extensions also work without introducing extra dots).
     // We then simply assert that the extension has no further dots, which we can do,
     // as we are the only ones setting extensions in this program (the user cannot chose them).
-    auto const dir = ( with_dir ? genesis::util::core::dir_normalize_path( out_dir_ ) : "" );
+    auto const dir = ( with_dir ? genesis::util::core::dir_normalize_path( out_dir.value ) : "" );
     auto const ext = ( extension.empty() || extension[0] == '.' ) ? extension : "." + extension;
     internal_check( ext.size() < 2 || ext[1] != '.', "Extension contains multiple leading dots." );
 
-    return dir + prefix_ + infix + suffix_ + ext + ( compress_ ? ".gz" : "" );
+    return dir + prefix.value + infix + suffix.value + ext + ( compress.value ? ".gz" : "" );
 }
 
 void FileOutputOptions::check_output_files_nonexistence(
@@ -238,7 +237,7 @@ void FileOutputOptions::check_output_files_nonexistence(
     // Shortcut: if the dir is not created yet, there cannot be any existing files in it.
     // We do this check here, so that we can be sure later in this function that the dir
     // is there, so that listing it contents etc actually works.
-    if( ! dir_exists( out_dir_ ) ) {
+    if( ! dir_exists( out_dir.value ) ) {
         return;
     }
 
@@ -272,7 +271,7 @@ void FileOutputOptions::check_output_files_nonexistence(
     };
 
     // Get all files in the output dir.
-    auto const dir_cont = dir_list_contents( out_dir_, false );
+    auto const dir_cont = dir_list_contents( out_dir.value, false );
 
     // Go through all filenames without dir names that we want to check.
     // We use this as the outer loop to avoid recomputing file names.
@@ -307,11 +306,11 @@ std::shared_ptr<genesis::util::io::BaseOutputTarget> FileOutputOptions::get_outp
     // Create dir if needed. This might create the dir also in cases were something fails later,
     // so we end up with an empty dir. This is however common in many other programs as well,
     // so let's not bother with this.
-    dir_create( out_dir_, true );
+    dir_create( out_dir.value, true );
 
     // Make an output target, optionally using gzip compression.
     return to_file(
         get_output_filename( infix, extension ),
-        compress_ ? GzipCompressionLevel::kDefaultCompression : GzipCompressionLevel::kNoCompression
+        compress.value ? GzipCompressionLevel::kDefaultCompression : GzipCompressionLevel::kNoCompression
     );
 }

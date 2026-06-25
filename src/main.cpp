@@ -136,7 +136,7 @@ int main( int argc, char** argv )
         std::string message
             = "Output file '" + error.filename() + "' already exists. If you want to allow "
             + "overwriting of existing output files, use "
-            + global_options.opt_allow_file_overwriting.option->get_name()
+            + global_options.allow_file_overwriting.option->get_name()
         ;
         LOG_BOLD << message;
         LOG_BOLD;
