@@ -99,15 +99,6 @@ void setup_map_index( CLI::App& app )
     );
     options->canonical.option->group( "Settings" );
 
-    // Max occurrences per k-mer.
-    options->max_occurrences_per_kmer = sub->add_option(
-        "--max-occurrences-per-kmer",
-        options->max_occurrences_per_kmer.value,
-        "Maximum number of occurrences to keep per k-mer. If a k-mer occurs more often than this, "
-        "all its occurrences are discarded. The default value of 0 means no limit."
-    );
-    options->max_occurrences_per_kmer.option->group( "Settings" );
-
     // Genome bin width.
     options->genome_bin_width = sub->add_option(
         "--genome-bin-width",
@@ -118,29 +109,10 @@ void setup_map_index( CLI::App& app )
     options->genome_bin_width.option->group( "Settings" );
 
     // -------------------------------------------------------------------
-    //     Performance
+    //     Builder options
     // -------------------------------------------------------------------
 
-    // Pending capacity.
-    options->pending_capacity = sub->add_option(
-        "--pending-capacity",
-        options->pending_capacity.value,
-        "Number of pending positions buffered per k-mer before they are flushed into the index. "
-        "Higher values increase memory usage but speed up indexing. "
-    );
-    options->pending_capacity.option->check( CLI::NonNegativeNumber );
-    options->pending_capacity.option->group( "Performance" );
-
-    // Position bits. Hidden, as this is a low-level detail that most users will not need.
-    options->position_bits = sub->add_option(
-        "--position-bits",
-        options->position_bits.value,
-        "Number of bits used to store genome bin positions in the index, either 32 or 64. "
-        "32 bits suffice for reference genomes of up to about 550 Gbp (with the default "
-        "genome bin width); use 64 only for substantially larger references."
-    );
-    options->position_bits.option->check( CLI::IsMember( std::vector<size_t>{ 32, 64 } ));
-    options->position_bits.option->group( "" );
+    options->builder.add_build_opts_to_app( sub );
 
     // -------------------------------------------------------------------
     //     Output
@@ -202,12 +174,7 @@ void run_map_index_impl( MapIndexOptions const& options )
 
     // Set up the inverted index builder.
     using Builder = spear::inverted_index::InvertedIndexBuilder<PositionT>;
-    typename Builder::Config builder_config;
-    builder_config.pending_capacity = options.pending_capacity.value;
-    builder_config.max_postings_per_term = static_cast<typename Builder::stored_count_type>(
-        options.max_occurrences_per_kmer.value
-    );
-    Builder builder( num_term_indices, builder_config );
+    Builder builder( num_term_indices, options.builder.make_builder_config<Builder>() );
 
     // Set up the canonical encoder, if requested. We use an optional-like raw pointer here,
     // as MinimalCanonicalEncoding has no default constructor.
@@ -240,6 +207,7 @@ void run_map_index_impl( MapIndexOptions const& options )
     auto fasta_input = FastaInputStream( io::from_file( options.fasta.value ));
     fasta_input.reader().validate_labels( false );
     for( auto& sequence : fasta_input ) {
+        LOG_MSG2 << "Processing sequence " << sequence.label();
         ++sequence_count;
         auto const offset = total_length;
         total_length += sequence.sites().size();
@@ -258,13 +226,14 @@ void run_map_index_impl( MapIndexOptions const& options )
         }
 
         // Record the sequence metadata for the output json file.
+        using namespace genesis::util::format;
         auto const& label = sequence.label();
         auto const name_end = label.find_first_of( " \t" );
         auto const name = ( name_end == std::string::npos ) ? label : label.substr( 0, name_end );
-        auto entry = genesis::util::format::JsonDocument::object();
-        entry["name"] = genesis::util::format::JsonDocument::string( name );
-        entry["header"] = genesis::util::format::JsonDocument::string( label );
-        entry["length"] = genesis::util::format::JsonDocument::number_unsigned( sequence.sites().size() );
+        auto entry = JsonDocument::object();
+        entry["name"] = JsonDocument::string( name );
+        entry["header"] = JsonDocument::string( label );
+        entry["length"] = JsonDocument::number_unsigned( sequence.sites().size() );
         sequences_json.push_back( std::move( entry ));
 
         // Process the k-mers of this sequence in a separate thread.
@@ -304,10 +273,7 @@ void run_map_index_impl( MapIndexOptions const& options )
     // as write() already flushes all pending data as part of its single pass over the entries.
     auto const index_path = options.output.get_output_filename( "map-index", "sidx" );
     auto const stats = builder.write( index_path );
-    LOG_MSG
-        << "Wrote index to " << index_path << " (" << stats.total_blob_bytes << " bytes of "
-        << "compressed posting data)."
-    ;
+    LOG_MSG << "Wrote index to " << index_path;
 
     // Statistics output for the user.
     size_t posting_count_sum = 0;
@@ -334,13 +300,13 @@ void run_map_index_impl( MapIndexOptions const& options )
     doc["canonical"] = genesis::util::format::JsonDocument::boolean( canonical );
     doc["genome_bin_width"] = genesis::util::format::JsonDocument::number_unsigned( w );
     // doc["pending_capacity"] = genesis::util::format::JsonDocument::number_unsigned(
-    //     options.pending_capacity.value
+    //     options.builder.pending_capacity.value
     // );
     doc["max_occurrences_per_kmer"] = genesis::util::format::JsonDocument::number_unsigned(
-        options.max_occurrences_per_kmer.value
+        options.builder.max_postings_per_term.value
     );
     doc["position_bits"] = genesis::util::format::JsonDocument::number_unsigned(
-        options.position_bits.value
+        options.builder.position_bits.value
     );
     doc["total_genome_length"] = genesis::util::format::JsonDocument::number_unsigned( total_length );
     doc["sequences"] = std::move( sequences_json );
@@ -353,9 +319,15 @@ void run_map_index_impl( MapIndexOptions const& options )
 
 void run_map_index( MapIndexOptions const& options )
 {
-    if( options.position_bits.value == 64 ) {
+    if( options.builder.position_bits.value == 64 ) {
         run_map_index_impl<std::uint64_t>( options );
-    } else {
+    } else if( options.builder.position_bits.value == 32 ) {
         run_map_index_impl<std::uint32_t>( options );
+    } else {
+        throw std::invalid_argument(
+            "Invalid --position-bits value " +
+            std::to_string( options.builder.position_bits.value ) +
+            "; must be 32 or 64."
+        );
     }
 }

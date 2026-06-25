@@ -27,6 +27,7 @@
 #include "CLI/CLI.hpp"
 
 #include "options/file_output.hpp"
+#include "options/inverted_index_builder.hpp"
 #include "tools/cli_option.hpp"
 
 #include <string>
@@ -42,17 +43,15 @@ struct MapIndexOptions
     CliOption<std::string> fasta = "";
 
     // Settings
-    CliOption<size_t>      k = 16;
-    CliOption<bool>        canonical = false;
-    CliOption<size_t>      max_occurrences_per_kmer = 0;
-    CliOption<size_t>      genome_bin_width = 128;
+    CliOption<size_t>           k = 16;
+    CliOption<bool>             canonical = false;
+    CliOption<size_t>           genome_bin_width = 128;
 
-    // Performance
-    CliOption<size_t>      pending_capacity = 16;
-    CliOption<size_t>      position_bits = 32;
+    // Builder options (pending capacity, max occurrences per k-mer, position bits)
+    InvertedIndexBuilderOptions builder;
 
     // Output
-    FileOutputOptions      output;
+    FileOutputOptions           output;
 };
 
 // =================================================================================================
