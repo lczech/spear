@@ -26,6 +26,7 @@
 
 #include "CLI/CLI.hpp"
 
+#include "options/file_input.hpp"
 #include "options/file_output.hpp"
 #include "options/inverted_index_builder.hpp"
 #include "tools/cli_option.hpp"
@@ -40,7 +41,7 @@
 struct MapIndexOptions
 {
     // Input
-    CliOption<std::string> fasta = "";
+    FileInputOptions fasta;
 
     // Settings
     CliOption<size_t>           k = 16;

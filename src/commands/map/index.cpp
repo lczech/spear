@@ -60,22 +60,18 @@ void setup_map_index( CLI::App& app )
     auto options = std::make_shared<MapIndexOptions>();
     auto sub = app.add_subcommand(
         "index",
-        "Index a reference genome for mapping short reads to it."
+        "Index one or more reference sequences for mapping short reads to them."
     );
 
     // -------------------------------------------------------------------
     //     Input
     // -------------------------------------------------------------------
 
-    // Input fasta file.
-    options->fasta = sub->add_option(
-        "--fasta-file",
-        options->fasta.value,
-        "Input reference genome in fasta or fasta.gz format to build the index from."
+    // Input fasta files or directories.
+    options->fasta.add_multi_file_input_opt_to_app(
+        sub, "fasta", "fasta/fasta.gz",
+        "(fasta|fas|fna|fa)(\\.gz)?", "{fasta,fas,fna,fa}[.gz]"
     );
-    options->fasta.option->check( CLI::ExistingFile );
-    options->fasta.option->required();
-    options->fasta.option->group( "Input" );
 
     // -------------------------------------------------------------------
     //     Settings
@@ -200,49 +196,55 @@ void run_map_index_impl( MapIndexOptions const& options )
         << text::to_string_byte_format( core::info_process_current_memory_usage() )
     ;
 
-    // Sequentially iterate over the input fasta file, dispatching the k-mer extraction and
-    // index building for each sequence to the thread pool. We keep track of the total length
-    // of all sequences seen so far, which gives us the global offset of each new sequence in
-    // the concatenated coordinate space that the index positions refer to.
+    // Sequentially iterate over all input fasta files and their sequences, dispatching the k-mer
+    // extraction and index building for each sequence to the thread pool. We keep track of the
+    // total length of all sequences seen so far, which gives us the global offset of each new
+    // sequence in the concatenated coordinate space that the index positions refer to.
+    // Duplicate sequence names across files are allowed; they are disambiguated in the reference
+    // catalog by their file index.
     std::size_t total_length = 0;
     std::size_t sequence_count = 0;
-    auto fasta_input = FastaInputStream( io::from_file( options.fasta.value ));
-    fasta_input.reader().validate_labels( false );
-    for( auto& sequence : fasta_input ) {
-        LOG_MSG2 << "Processing sequence " << sequence.label();
-        ++sequence_count;
-        auto const offset = total_length;
-        auto const seq_length = sequence.sites().size();
-        total_length += seq_length;
+    auto const& fasta_paths = options.fasta.file_paths();
+    for( auto const& fasta_path : fasta_paths ) {
+        LOG_MSG1 << "Processing file " << fasta_path;
+        auto fasta_input = FastaInputStream( io::from_file( fasta_path ));
+        fasta_input.reader().validate_labels( false );
+        for( auto& sequence : fasta_input ) {
+            LOG_MSG2 << "Processing sequence " << sequence.label();
+            ++sequence_count;
+            auto const offset = total_length;
+            auto const seq_length = sequence.sites().size();
+            total_length += seq_length;
 
-        // Check that the new total length still fits into the position type of the genome bins.
-        auto constexpr max_pos = static_cast<std::size_t>( std::numeric_limits<PositionT>::max() );
-        if( total_length > 0 && ( total_length - 1 ) / w > max_pos ) {
-            throw std::runtime_error(
-                "Reference genome is too large for the configured genome bin width and position "
-                "type: the highest genome bin index (" + std::to_string(( total_length - 1 ) / w ) +
-                ") does not fit into " + std::to_string( sizeof(PositionT) * 8 ) + " bits. "
-                "Increase --genome-bin-width, or use a larger --position-bits value."
-            );
-        }
-
-        // Record the sequence in the reference collection (length-only; sites not needed here).
-        reference_col.add( options.fasta.value, sequence.label(), seq_length );
-
-        // Process the k-mers of this sequence in a separate thread.
-        auto seq_str = std::make_shared<std::string>( std::move( sequence.sites() ));
-        thread_pool->enqueue_detached( [&builder, &encoder, k, w, offset, seq_str]()
-        {
-            auto extractor = KmerExtractor( k, std::move( *seq_str ));
-            for( auto const& kmer : extractor ) {
-                auto const term_index = static_cast<typename Builder::term_index_type>(
-                    encoder ? encoder->encode( kmer ) : kmer.value
+            // Check that the new total length still fits into the position type of the genome bins.
+            auto constexpr max_pos = static_cast<std::size_t>( std::numeric_limits<PositionT>::max() );
+            if( total_length > 0 && ( total_length - 1 ) / w > max_pos ) {
+                throw std::runtime_error(
+                    "Reference genome is too large for the configured genome bin width and position "
+                    "type: the highest genome bin index (" + std::to_string(( total_length - 1 ) / w ) +
+                    ") does not fit into " + std::to_string( sizeof(PositionT) * 8 ) + " bits. "
+                    "Increase --genome-bin-width, or use a larger --position-bits value."
                 );
-                auto const global_pos = offset + kmer.location;
-                auto const bin_index = static_cast<PositionT>( global_pos / w );
-                builder.add( term_index, bin_index );
             }
-        });
+
+            // Record the sequence in the reference collection (length-only; sites not needed here).
+            reference_col.add( fasta_path, sequence.label(), seq_length );
+
+            // Process the k-mers of this sequence in a separate thread.
+            auto seq_str = std::make_shared<std::string>( std::move( sequence.sites() ));
+            thread_pool->enqueue_detached( [&builder, &encoder, k, w, offset, seq_str]()
+            {
+                auto extractor = KmerExtractor( k, std::move( *seq_str ));
+                for( auto const& kmer : extractor ) {
+                    auto const term_index = static_cast<typename Builder::term_index_type>(
+                        encoder ? encoder->encode( kmer ) : kmer.value
+                    );
+                    auto const global_pos = offset + kmer.location;
+                    auto const bin_index = static_cast<PositionT>( global_pos / w );
+                    builder.add( term_index, bin_index );
+                }
+            });
+        }
     }
     thread_pool->wait_for_all_pending_tasks();
 
@@ -251,7 +253,8 @@ void run_map_index_impl( MapIndexOptions const& options )
         << text::to_string_byte_format( core::info_process_current_memory_usage() )
     ;
     LOG_MSG
-        << "Processed " << sequence_count << " sequences with a total length of "
+        << "Processed " << fasta_paths.size() << " file(s), "
+        << sequence_count << " sequences, total length "
         << total_length << " bases."
     ;
 
