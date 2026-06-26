@@ -43,6 +43,7 @@
 #include <cstdint>
 #include <span>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace spear::inverted_index {
@@ -54,30 +55,39 @@ namespace spear::inverted_index {
 /**
  * @brief Finds maximal hit intervals across a TermPostings collection.
  *
- * Given a TermPostings collection, a window length @p L, and a minimum hit count @p M,
+ * Given a TermPostings collection, a window length, and a minimum hit count,
  * finds every maximal interval [v_left, v_right] in posting-value space such that a
- * sliding window of size L can be placed anywhere within it and still see at least M
- * distinct posting lists represented.
+ * sliding window of size window_length can be placed anywhere within it and still see at least
+ * min_hit_count distinct posting lists represented.
  *
  * Internally runs a streaming k-way merge over the S sorted posting lists via a
  * genesis::util::container::TournamentTree, maintaining a small ring buffer (size @p RingCap,
- * a power of two, such that RingCap > L) of (value, Bitset256) window entries. All scratch
- * state (tournament tree, ring buffer) is held as members and reused across calls to avoid
- * per-query allocations.
+ * a power of two, such that RingCap > window_length) of (value, ListBitset) window entries.
+ * All scratch state (tournament tree, ring buffer) is held as members and reused across calls
+ * to avoid per-query allocations.
  *
  * @tparam PositionT  Unsigned integer type for posting positions. numeric_limits<PositionT>::max()
  *                    is reserved as a sentinel by the tournament tree and must not appear as an
  *                    actual posting value; InvertedIndex::open() enforces this via max_position().
- * @tparam RingCap    Ring buffer capacity; must be a power of two and satisfy RingCap > L
- *                    for every L passed to query(). Default 16 supports L up to 15.
- *                    Use 128 for L up to 127, etc.
+ * @tparam RingCap    Ring buffer capacity; must be a power of two and satisfy
+ *                    RingCap > window_length for every window_length passed to query().
+ *                    Default 32 supports window_length up to 31; use 64 for up to 63, etc.
  */
-template<typename PositionT = std::uint64_t, std::size_t RingCap = 16>
+template<typename PositionT = std::uint64_t, std::size_t RingCap = 32>
 class HitCollector
 {
     static_assert( (RingCap & (RingCap - 1)) == 0, "RingCap must be a power of two" );
 
 public:
+
+    // -------------------------------------------------------------------------
+    //     Constants
+    // -------------------------------------------------------------------------
+
+    // Maximum number of distinct posting lists (k-mers) trackable per query window.
+    // ListBitset derives its word-array size from this; changing it here propagates automatically.
+    static constexpr std::size_t kMaxLists = 256;
+    static_assert( kMaxLists % 64 == 0, "kMaxLists must be a multiple of 64" );
 
     // -------------------------------------------------------------------------
     //     Typedefs
@@ -88,7 +98,8 @@ public:
     /**
      * @brief A maximal interval [v_left, v_right] where the hit condition is continuously met.
      *
-     * Every window of size L placed within this interval captures at least M distinct lists.
+     * Every window of size window_length placed within this interval captures at least
+     * min_hit_count distinct lists.
      * `peak_count` is the maximum distinct-list count seen across all window positions within
      * the interval; used to sort results by strength (highest peak first).
      */
@@ -104,46 +115,49 @@ public:
     // -------------------------------------------------------------------------
 
     /**
-     * @brief Find all maximal hit intervals; results are appended to @p out (cleared first),
-     * and sorted by peak_count descending, then v_left ascending.
+     * @brief Find all maximal hit intervals; results are appended to @p hit_intervals
+     * (cleared first), and sorted by peak_count descending, then v_left ascending.
      *
-     * @param coll  Populated TermPostings collection.
-     * @param L     Window length: a window [x, x+L] must cover values from >= M lists.
-     * @param M     Minimum number of distinct lists required; must be >= 1.
-     * @param out   Output vector; cleared then filled with results. Sorted by peak hit count.
+     * @param term_postings   Populated TermPostings collection.
+     * @param window_length   Window length: a window [x, x+window_length] must cover values
+     *                        from >= min_hit_count lists.
+     * @param min_hit_count   Minimum number of distinct lists required; must be >= 1.
+     * @param hit_intervals   Output vector; cleared then filled with results. Sorted by peak
+     *                        hit count.
      *
-     * Returns immediately with an empty @p out if M > coll.list_count().
-     * Throws std::invalid_argument if M == 0.
+     * Returns immediately with an empty @p hit_intervals if min_hit_count > list_count().
+     * Throws std::invalid_argument if min_hit_count == 0.
      */
     void query(
-        TermPostings<PositionT> const& coll,
-        PositionT                      L,
-        std::size_t                    M,
-        std::vector<HitInterval>&      out
+        TermPostings<PositionT> const& term_postings,
+        PositionT                      window_length,
+        std::size_t                    min_hit_count,
+        std::vector<HitInterval>&      hit_intervals
     ) {
-        out.clear();
+        hit_intervals.clear();
 
-        if( M == 0 ) {
-            throw std::invalid_argument( "HitCollector::query: M must be >= 1" );
+        if( min_hit_count == 0 ) {
+            throw std::invalid_argument( "HitCollector::query: min_hit_count must be >= 1" );
         }
-        if( coll.list_count() == 0 || M > coll.list_count() ) {
+        if( term_postings.list_count() == 0 || min_hit_count > term_postings.list_count() ) {
             return;
         }
-        if( L >= static_cast<PositionT>( RingCap ) ) {
+        if( window_length >= static_cast<PositionT>( RingCap ) ) {
             throw std::invalid_argument(
-                "HitCollector::query: L >= RingCap; increase the RingCap template parameter"
+                "HitCollector::query: window_length >= RingCap; increase the RingCap template parameter"
             );
         }
-        if( coll.list_count() > 256 ) {
+        if( term_postings.list_count() > kMaxLists ) {
             throw std::invalid_argument(
-                "HitCollector::query: list_count() > 256; Bitset256 supports at most 256 lists"
+                "HitCollector::query: list_count() > kMaxLists; ListBitset supports at most "
+                + std::to_string( kMaxLists ) + " lists"
             );
         }
 
         // Build a fresh tournament tree, sized to the actual number of input lists, and
         // seed it with one bin per posting list.
-        genesis::util::container::TournamentTree<PositionT> tree( coll.list_count() );
-        tree.build( coll.lists() );
+        genesis::util::container::TournamentTree<PositionT> tree( term_postings.list_count() );
+        tree.build( term_postings.lists() );
 
         // Ring buffer state
         // ring_head and ring_tail are monotonically increasing;
@@ -168,7 +182,7 @@ public:
         };
 
         // Hit tracking state
-        Bitset256   list_hits{};
+        ListBitset  list_hits{};
         bool        in_valid     = false;
         PositionT   region_start = {};
         PositionT   region_end   = {};
@@ -195,14 +209,14 @@ public:
                 ++ring_tail;
             }
 
-            // Shrink from front: evict values outside [val-L, val]
+            // Shrink from front: evict values outside [val-window_length, val]
             // Subtraction is safe: heap yields sorted values, so val >= ring_front().value.
-            while( ring_size() > 0 && val - ring_front().value > L ) {
+            while( ring_size() > 0 && val - ring_front().value > window_length ) {
                 ++ring_head;
             }
 
             // Recompute window join from scratch
-            // At most L+1 entries; each join is 4 uint64_t operations.
+            // At most window_length+1 entries; each join is 4 uint64_t operations.
             list_hits.reset();
             for( std::size_t j = ring_head; j < ring_tail; ++j ) {
                 list_hits.join_with( ring_[ j & ring_mod ].bits );
@@ -210,7 +224,7 @@ public:
 
             // Update maximal valid-region tracking
             int const hits = list_hits.hit_count();
-            if( hits >= static_cast<int>( M ) ) {
+            if( hits >= static_cast<int>( min_hit_count ) ) {
                 if( !in_valid ) {
                     in_valid     = true;
                     region_start = ring_front().value;
@@ -222,17 +236,17 @@ public:
                 }
             } else if( in_valid ) {
                 in_valid = false;
-                out.push_back({ region_start, region_end, peak_count });
+                hit_intervals.push_back({ region_start, region_end, peak_count });
             }
         }
 
         // Flush any open valid region at end of stream
         if( in_valid ) {
-            out.push_back({ region_start, region_end, peak_count });
+            hit_intervals.push_back({ region_start, region_end, peak_count });
         }
 
         // Sort by peak_count descending: strongest regions first
-        std::sort( out.begin(), out.end(), []( HitInterval const& a, HitInterval const& b ) {
+        std::sort( hit_intervals.begin(), hit_intervals.end(), []( HitInterval const& a, HitInterval const& b ) {
             return a.peak_count > b.peak_count;
         });
     }
@@ -243,13 +257,13 @@ public:
      * Prefer the out-parameter overload to reuse the result vector across calls.
      */
     std::vector<HitInterval> query(
-        TermPostings<PositionT> const& coll,
-        PositionT                      L,
-        std::size_t                    M
+        TermPostings<PositionT> const& term_postings,
+        PositionT                      window_length,
+        std::size_t                    min_hit_count
     ) {
-        std::vector<HitInterval> out;
-        query( coll, L, M, out );
-        return out;
+        std::vector<HitInterval> hit_intervals;
+        query( term_postings, window_length, min_hit_count, hit_intervals );
+        return hit_intervals;
     }
 
     // -------------------------------------------------------------------------
@@ -259,34 +273,30 @@ public:
 private:
 
     /**
-     * @brief Fixed 256-bit bitset for tracking up to 256 distinct term list memberships.
+     * @brief Fixed-capacity bitset tracking which posting lists are represented in the window.
      *
-     * Stored as four `uint64_t` words. All operations are branchless word-level instructions.
-     *
-     * To extend beyond 256 lists, four things need to change:
-     *  1. Grow `w`: increase the `std::array` size (N words → 64*N bit capacity).
-     *  2. `join_with`: add one `w[k] |= o.w[k]` line per new word.
-     *  3. `popcount`: add one `std::popcount(w[k])` term per new word.
-     *  4. The guard in `HitCollector::query`: update the `list_count() > 256` threshold
-     *     to match the new capacity (64 * array size).
-     * `set()` already uses `i >> 6` / `i & 63u` generically and needs no change.
-     * `TournamentTree::BinEntry::list_index` is `std::size_t` and also needs no change.
+     * One bit per posting list; capacity is kMaxLists (must be a multiple of 64). Stored as
+     * kWords = kMaxLists/64 uint64_t words. All operations are branchless word-level instructions
+     * unrolled at compile time via index_sequence fold expressions — updating kMaxLists
+     * automatically scales all operations with no manual changes required here.
      */
-    struct Bitset256
+    struct ListBitset
     {
-        std::array<std::uint64_t, 4> w = {};
+        static constexpr std::size_t kWords = kMaxLists / 64;
+        std::array<std::uint64_t, kWords> w = {};
 
         void set( std::size_t i ) noexcept
         {
             w[i >> 6] |= std::uint64_t{1} << (i & 63u);
         }
 
-        void join_with( Bitset256 const& o ) noexcept
+        void join_with( ListBitset const& o ) noexcept
         {
-            w[0] |= o.w[0];
-            w[1] |= o.w[1];
-            w[2] |= o.w[2];
-            w[3] |= o.w[3];
+            // Fold over indices 0..kWords-1 at compile time; expands to kWords OR assignments
+            // with no runtime loop. Equivalent to w[0] |= o.w[0]; w[1] |= o.w[1]; ... for any kWords.
+            [&]<std::size_t... I>( std::index_sequence<I...> ) noexcept {
+                (( w[I] |= o.w[I] ), ...);
+            }( std::make_index_sequence<kWords>{} );
         }
 
         void reset() noexcept
@@ -296,17 +306,18 @@ private:
 
         int hit_count() const noexcept
         {
-            return
-                std::popcount( w[0] ) + std::popcount( w[1] ) +
-                std::popcount( w[2] ) + std::popcount( w[3] )
-            ;
+            // Fold over indices 0..kWords-1 at compile time; expands to a sum of kWords popcount
+            // calls with no runtime loop. The + fold collapses to a single integer at compile time.
+            return [&]<std::size_t... I>( std::index_sequence<I...> ) noexcept {
+                return static_cast<int>(( std::popcount( w[I] ) + ... ));
+            }( std::make_index_sequence<kWords>{} );
         }
     };
 
     struct WindowEntry
     {
-        PositionT value;
-        Bitset256 bits;
+        PositionT  value;
+        ListBitset bits;
     };
 
     std::array<WindowEntry, RingCap> ring_{};

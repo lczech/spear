@@ -226,7 +226,7 @@ TEST( HitCollector, ThrowsOnLGeRingCap )
 
 TEST( HitCollector, ThrowsOnTooManyLists )
 {
-    // Build a TermPostings with 257 non-empty lists to exceed the Bitset256 capacity.
+    // Build a TermPostings with 257 non-empty lists to exceed the ListBitset capacity.
     TP tp( 257 );
     for( std::size_t i = 0; i < 257; ++i ) {
         tp.add( std::vector<std::uint64_t>{ i + 1 } );
