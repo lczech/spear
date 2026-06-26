@@ -86,7 +86,7 @@ public:
         std::size_t file_index = 0;
 
         // Length in bases of this sequence.
-        std::uint64_t length = 0;
+        std::size_t length = 0;
 
         // Actual nucleotide sequence; empty unless the collection was built with store_sites=true.
         std::string sites;
@@ -120,10 +120,10 @@ public:
         SequenceRecord const* sequence = nullptr;
 
         // Index of the sequence within sequences().
-        std::size_t           index = 0;
+        std::size_t index = 0;
 
         // Offset of the queried position within the sequence: global_pos - sequence_start.
-        std::uint64_t         local_offset = 0;
+        std::size_t local_offset = 0;
     };
 
     // -------------------------------------------------------------------------
@@ -146,7 +146,7 @@ public:
     /**
      * @brief Add a sequence given its full FASTA label and length; no sequence data is stored.
      */
-    void add( std::string const& fasta_path, std::string const& header, std::uint64_t length );
+    void add( std::string const& fasta_path, std::string const& header, std::size_t length );
 
     /**
      * @brief Add a sequence given its full FASTA label and nucleotide bases; @p sites is moved in.
@@ -231,14 +231,14 @@ public:
      * The sequence occupies global positions
      * [global_offset_of(i), global_offset_of(i) + sequences()[i].length).
      */
-    std::uint64_t global_offset_of( std::size_t index ) const {
+    std::size_t global_offset_of( std::size_t index ) const {
         return offsets_[index];
     }
 
     /**
      * @brief Return the total number of bases across all sequences.
      */
-    std::uint64_t total_length() const {
+    std::size_t total_length() const {
         return offsets_.back();
     }
 
@@ -253,7 +253,7 @@ public:
      *
      * @throws std::out_of_range if the collection is empty or global_pos >= total_length().
      */
-    FindResult find_by_global_position( std::uint64_t global_pos ) const;
+    FindResult find_by_global_position( std::size_t global_pos ) const;
 
     // -------------------------------------------------------------------------
     //     Iterators
@@ -285,7 +285,7 @@ private:
 
     // n+1 prefix-sum sentinel: offsets_[0]=0, offsets_[i+1]=offsets_[i]+length_i.
     // Initialized with {0} so total_length()==0 on an empty collection.
-    std::vector<std::uint64_t>  offsets_ = { 0 };
+    std::vector<std::size_t>  offsets_ = { 0 };
 };
 
 } // namespace reference

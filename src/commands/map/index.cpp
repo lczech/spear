@@ -22,10 +22,12 @@
 */
 
 #include "commands/map/index.hpp"
+#include "commands/map/format.hpp"
 #include "options/global.hpp"
 #include "tools/cli_setup.hpp"
 
 #include "spear/inverted_index/builder.hpp"
+#include "spear/reference/collection.hpp"
 
 #include "genesis/sequence/format/fasta_reader.hpp"
 #include "genesis/sequence/format/fastx_input_stream.hpp"
@@ -67,7 +69,7 @@ void setup_map_index( CLI::App& app )
 
     // Input fasta file.
     options->fasta = sub->add_option(
-        "--fasta",
+        "--fasta-file",
         options->fasta.value,
         "Input reference genome in fasta or fasta.gz format to build the index from."
     );
@@ -92,10 +94,10 @@ void setup_map_index( CLI::App& app )
     options->canonical = sub->add_flag(
         "--canonical",
         options->canonical.value,
-        "Index canonical k-mers (the lexicographically/numerically smaller of a k-mer and its "
-        "reverse complement), halving the number of distinct terms. If not set, k-mers are "
-        "indexed as-is, and reverse-complement matches need to be found by separately querying "
-        "the reverse complement k-mers of a read against the index."
+        "Index canonical k-mers (the k-mer and its reverse complement), halving the number of "
+        "distinct terms. If not set, k-mers are indexed as-is, and reverse-complement matches "
+        "need to be found by separately querying the reverse complement k-mers of a read against "
+        "the index, which can reduce alignment time."
     );
     options->canonical.option->group( "Settings" );
 
@@ -183,8 +185,8 @@ void run_map_index_impl( MapIndexOptions const& options )
         encoder = std::make_unique<MinimalCanonicalEncoding>( k );
     }
 
-    // Collect the metadata for the sequences that we process, for the output json file.
-    auto sequences_json = genesis::util::format::JsonDocument::array();
+    // Collect reference sequence metadata as we process each sequence.
+    spear::reference::ReferenceCollection reference_col;
 
     // Get the thread pool to dispatch per-sequence work to.
     auto thread_pool = global_options.thread_pool();
@@ -210,13 +212,12 @@ void run_map_index_impl( MapIndexOptions const& options )
         LOG_MSG2 << "Processing sequence " << sequence.label();
         ++sequence_count;
         auto const offset = total_length;
-        total_length += sequence.sites().size();
+        auto const seq_length = sequence.sites().size();
+        total_length += seq_length;
 
         // Check that the new total length still fits into the position type of the genome bins.
-        if(
-            total_length > 0 &&
-            ( total_length - 1 ) / w > static_cast<std::size_t>( std::numeric_limits<PositionT>::max() )
-        ) {
+        auto constexpr max_pos = static_cast<std::size_t>( std::numeric_limits<PositionT>::max() );
+        if( total_length > 0 && ( total_length - 1 ) / w > max_pos ) {
             throw std::runtime_error(
                 "Reference genome is too large for the configured genome bin width and position "
                 "type: the highest genome bin index (" + std::to_string(( total_length - 1 ) / w ) +
@@ -225,16 +226,8 @@ void run_map_index_impl( MapIndexOptions const& options )
             );
         }
 
-        // Record the sequence metadata for the output json file.
-        using namespace genesis::util::format;
-        auto const& label = sequence.label();
-        auto const name_end = label.find_first_of( " \t" );
-        auto const name = ( name_end == std::string::npos ) ? label : label.substr( 0, name_end );
-        auto entry = JsonDocument::object();
-        entry["name"] = JsonDocument::string( name );
-        entry["header"] = JsonDocument::string( label );
-        entry["length"] = JsonDocument::number_unsigned( sequence.sites().size() );
-        sequences_json.push_back( std::move( entry ));
+        // Record the sequence in the reference collection (length-only; sites not needed here).
+        reference_col.add( options.fasta.value, sequence.label(), seq_length );
 
         // Process the k-mers of this sequence in a separate thread.
         auto seq_str = std::make_shared<std::string>( std::move( sequence.sites() ));
@@ -292,27 +285,20 @@ void run_map_index_impl( MapIndexOptions const& options )
         }
     }
 
-    // Write the json metadata file, describing the index and the reference it was built from.
-    auto doc = genesis::util::format::JsonDocument::object();
-    doc["fasta"] = genesis::util::format::JsonDocument::string( options.fasta.value );
-    doc["index_file"] = genesis::util::format::JsonDocument::string( index_path );
-    doc["k"] = genesis::util::format::JsonDocument::number_unsigned( k );
-    doc["canonical"] = genesis::util::format::JsonDocument::boolean( canonical );
-    doc["genome_bin_width"] = genesis::util::format::JsonDocument::number_unsigned( w );
-    // doc["pending_capacity"] = genesis::util::format::JsonDocument::number_unsigned(
-    //     options.builder.pending_capacity.value
-    // );
-    doc["max_occurrences_per_kmer"] = genesis::util::format::JsonDocument::number_unsigned(
-        options.builder.max_postings_per_term.value
-    );
-    doc["position_bits"] = genesis::util::format::JsonDocument::number_unsigned(
-        options.builder.position_bits.value
-    );
-    doc["total_genome_length"] = genesis::util::format::JsonDocument::number_unsigned( total_length );
-    doc["sequences"] = std::move( sequences_json );
+    // Write the JSON manifest with two sub-objects: "index" (build parameters) and
+    // "reference" (sequence catalog for coordinate resolution at query time).
+    MapIndexManifest manifest;
+    manifest.metadata.sidx_path                = genesis::util::core::file_basename( index_path );
+    manifest.metadata.k                        = k;
+    manifest.metadata.canonical                = canonical;
+    manifest.metadata.genome_bin_width         = w;
+    manifest.metadata.max_occurrences_per_kmer = options.builder.max_postings_per_term.value;
+    manifest.metadata.position_bits            = options.builder.position_bits.value;
+    manifest.metadata.total_genome_length      = total_length;
+    manifest.reference                         = std::move( reference_col );
 
     auto const json_target = options.output.get_output_target( "map-index", "json" );
-    genesis::util::format::JsonWriter().write( doc, json_target );
+    genesis::util::format::JsonWriter().write( manifest_to_json( manifest ), json_target );
 }
 
 } // anonymous namespace

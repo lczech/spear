@@ -71,17 +71,17 @@ ReferenceCollection build_collection(
  *
  * Stores the FASTA file list and per-sequence header, length, and file_index.
  * Sequence `sites` data is omitted (too large for metadata); lengths are re-derived from the
- * prefix-sum offsets. The document can be round-tripped via from_json().
+ * prefix-sum offsets. The document can be round-tripped via collection_from_json().
  */
-genesis::util::format::JsonDocument to_json( ReferenceCollection const& collection );
+genesis::util::format::JsonDocument collection_to_json( ReferenceCollection const& collection );
 
 /**
- * @brief Deserialize a ReferenceCollection from a JSON document produced by to_json().
+ * @brief Deserialize a ReferenceCollection from a JSON document produced by collection_to_json().
  *
  * Constructs and returns a new ReferenceCollection populated via the public add() interface.
  * Sequence `sites` data is not stored in JSON and will be empty in the returned collection.
  */
-ReferenceCollection from_json( genesis::util::format::JsonDocument const& doc );
+ReferenceCollection collection_from_json( genesis::util::format::JsonDocument const& doc );
 
 } // namespace reference
 } // namespace spear

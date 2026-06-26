@@ -98,7 +98,7 @@ ReferenceCollection build_collection(
 //     JSON I/O
 // =================================================================================================
 
-genesis::util::format::JsonDocument to_json( ReferenceCollection const& collection )
+genesis::util::format::JsonDocument collection_to_json( ReferenceCollection const& collection )
 {
     using namespace genesis::util::format;
 
@@ -126,7 +126,7 @@ genesis::util::format::JsonDocument to_json( ReferenceCollection const& collecti
     return doc;
 }
 
-ReferenceCollection from_json( genesis::util::format::JsonDocument const& doc )
+ReferenceCollection collection_from_json( genesis::util::format::JsonDocument const& doc )
 {
     auto const& obj = doc.get_object();
 

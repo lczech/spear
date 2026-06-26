@@ -39,7 +39,7 @@ namespace reference {
 void ReferenceCollection::add(
     std::string const& fasta_path,
     std::string const& header,
-    std::uint64_t length
+    std::size_t length
 ) {
     if( length == 0 ) {
         throw std::invalid_argument(
@@ -61,7 +61,7 @@ void ReferenceCollection::add(
             "ReferenceCollection::add: sequence '" + header + "' has empty sites"
         );
     }
-    auto const length = static_cast<std::uint64_t>( sites.size() );
+    auto const length = sites.size();
     auto const fi = register_file_( fasta_path );
     sequences_.push_back({ header, fi, length, std::move( sites ) });
     offsets_.push_back( offsets_.back() + length );
@@ -93,7 +93,7 @@ void ReferenceCollection::clear()
 // =================================================================================================
 
 ReferenceCollection::FindResult ReferenceCollection::find_by_global_position(
-    std::uint64_t global_pos
+    std::size_t global_pos
 ) const {
     if( sequences_.empty() ) {
         throw std::out_of_range(

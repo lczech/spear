@@ -381,7 +381,7 @@ TEST(ReferenceCollectionJson, RoundTrip)
     original.add( "a.fa", "chr2",              500u );
     original.add( "b.fa", "chrX",             2000u );
 
-    auto const clone = from_json( to_json(original) );
+    auto const clone = collection_from_json( collection_to_json(original) );
 
     ASSERT_EQ( clone.size(), 3u );
     ASSERT_EQ( clone.fasta_files().size(), 2u );
@@ -412,7 +412,7 @@ TEST(ReferenceCollectionJson, SitesNotStored)
     ReferenceCollection original;
     original.add( "f.fa", "chr1", std::string("ACGTACGT") );
 
-    auto const clone = from_json( to_json(original) );
+    auto const clone = collection_from_json( collection_to_json(original) );
     EXPECT_EQ( clone[0].length, 8u );
     EXPECT_TRUE( clone[0].sites.empty() );
 }
@@ -420,7 +420,7 @@ TEST(ReferenceCollectionJson, SitesNotStored)
 TEST(ReferenceCollectionJson, EmptyCollection)
 {
     ReferenceCollection original;
-    auto const clone = from_json( to_json(original) );
+    auto const clone = collection_from_json( collection_to_json(original) );
     EXPECT_TRUE( clone.empty() );
     EXPECT_EQ( clone.total_length(), 0u );
 }

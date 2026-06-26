@@ -289,10 +289,12 @@ public:
      * Thread-safe in both OpenMode variants.
      */
     [[nodiscard]] std::pair<std::vector<PositionT>, PostingsStatus>
-    postings( term_index_type term_index ) const
-    {
+    postings(
+        term_index_type term_index,
+        std::uint64_t max_posting_list_length = 0
+    ) const {
         std::vector<PositionT> buf;
-        PostingsStatus const status = postings( term_index, buf );
+        PostingsStatus const status = postings( term_index, buf, max_posting_list_length );
         return { std::move( buf ), status };
     }
 
@@ -315,7 +317,8 @@ public:
      */
     PostingsStatus
     postings(
-        term_index_type term_index, std::vector<PositionT>& target_buf,
+        term_index_type term_index,
+        std::vector<PositionT>& target_buf,
         std::uint64_t max_posting_list_length = 0
     ) const {
         assert( footer_.magic == INVERTED_INDEX_MAGIC );
