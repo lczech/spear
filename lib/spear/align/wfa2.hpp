@@ -138,6 +138,15 @@ struct Wfa2Result
      * Safe to move into AlignmentHit::cigar without any copy.
      */
     std::vector<uint32_t> cigar;
+
+    /**
+     * @brief Edit distance (NM tag): mismatches + inserted/deleted bases.
+     *
+     * Only valid for Scope::Cigar; 0 for Scope::Score, where no backtrace is computed.
+     * Correctly accounts for aDNA damage tolerance: a tolerated C→T/G→A substitution
+     * still counts as a mismatch here, even though it scored as a match.
+     */
+    int edit_distance = 0;
 };
 
 // =================================================================================================

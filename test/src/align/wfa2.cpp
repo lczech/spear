@@ -480,6 +480,56 @@ TEST( Wfa2Damage, NoDamageWithoutSettings )
     EXPECT_EQ( r.score,  -4 );
 }
 
+// The Score-only tests above only check that damage tolerance affects the alignment
+// *score*. The tests below test that a tolerated substitution must still score as a match
+// (score == 0), but must be reported as a mismatch (X, not =) in the CIGAR, and must be
+// counted in edit_distance.
+
+TEST( Wfa2Damage, CT5PrimeCigarShowsMismatch )
+{
+    Wfa2Settings s;
+    s.scope         = Wfa2Settings::Scope::Cigar;
+    s.damage_ct_end = 3;
+    Wfa2Aligner aligner{ s };
+
+    auto const r = aligner.align_cigar( "TACGT", "CACGT" );
+    EXPECT_EQ( r.status, Wfa2Result::Status::Ok );
+    EXPECT_EQ( r.score,  0 );  // tolerated during alignment/scoring
+    EXPECT_EQ( cigar_to_string( r.cigar ), "1X4=" );  // but reported as a mismatch in the CIGAR
+    EXPECT_EQ( r.edit_distance, 1 );
+}
+
+TEST( Wfa2Damage, GA3PrimeCigarShowsMismatch )
+{
+    Wfa2Settings s;
+    s.scope           = Wfa2Settings::Scope::Cigar;
+    s.damage_ga_start = 3;
+    Wfa2Aligner aligner{ s };
+
+    auto const r = aligner.align_cigar( "ACGAA", "ACGGG" );
+    EXPECT_EQ( r.status, Wfa2Result::Status::Ok );
+    EXPECT_EQ( r.score,  0 );
+    EXPECT_EQ( cigar_to_string( r.cigar ), "3=2X" );
+    EXPECT_EQ( r.edit_distance, 2 );
+}
+
+TEST( Wfa2Damage, CigarShowsMismatchWithCollapsedMCigar )
+{
+    // Same as CT5PrimeCigarShowsMismatch, but with use_extended_cigar=false: the CIGAR
+    // itself is ambiguous (all M), but edit_distance must still detect the substitution.
+    Wfa2Settings s;
+    s.scope              = Wfa2Settings::Scope::Cigar;
+    s.damage_ct_end      = 3;
+    s.use_extended_cigar = false;
+    Wfa2Aligner aligner{ s };
+
+    auto const r = aligner.align_cigar( "TACGT", "CACGT" );
+    EXPECT_EQ( r.status, Wfa2Result::Status::Ok );
+    EXPECT_EQ( r.score,  0 );
+    EXPECT_EQ( cigar_to_string( r.cigar ), "5M" );
+    EXPECT_EQ( r.edit_distance, 1 );
+}
+
 // =================================================================================================
 //     Edit distance cross-validation
 // =================================================================================================

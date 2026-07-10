@@ -22,9 +22,12 @@
 */
 
 #include "spear/align/wfa2.hpp"
-#include "spear/align/cigar.hpp"
+#include "spear/align/wfa2_cigar.hpp"
 
+#include <cassert>
+#include <cstddef>
 #include <stdexcept>
+#include <string_view>
 
 extern "C" {
 #include "wfa2/wavefront/wfa.h"
@@ -229,95 +232,27 @@ Wfa2Result Wfa2Aligner::align_cigar( std::string const& query, std::string const
     auto* wfa = impl_->wfa;
     cigar_t* cig = wfa->cigar;
 
-    // Encode into WFA2's internal buffer (BAM uint32_t RLE format) and get a pointer to it.
-    // cigar_buffer points into cig->cigar_buffer (no allocation); copy into the vector below.
-    uint32_t* cigar_buffer = nullptr;
-    int       cigar_length = 0;
-    cigar_get_CIGAR( cig, impl_->settings.use_extended_cigar, &cigar_buffer, &cigar_length );
-
-    // WFA2 names its ops from the pattern-matching convention (transform pattern into text),
-    // which is the opposite of SAM (transform reference→query). In WFA2's output:
-    //   op 1 ("I") = text/reference consumes without pattern/query  (= SAM D)
-    //   op 2 ("D") = pattern/query consumes without text/reference  (= SAM I)
-    // In the glocal/fitting mode (text_begin_free=tlen, text_end_free=tlen), unaligned
-    // reference positions at both flanks appear as leading/trailing op-1 runs.
-    //
-    // We correct this in one forward pass + back-trim:
-    //   1. Skip leading op-1 runs → their total length is ref_begin.
-    //   2. For the remaining ops, swap op 1↔2 to produce SAM-compliant I/D.
-    //   3. Trim trailing op-2 (post-swap) runs from the output → they were the trailing clips.
-    //   4. Sanity-check query_span == qlen and ref_end == cig->end_h - trailing_clip_len.
-    //
-    // WFA2 gap-affine only emits M(0), I(1), D(2), E(7), X(8); others indicate a bug.
-    // Note: WFA2's I(1) and D(2) are swapped vs SAM convention; see Step 2 below.
-
-    int const qlen = static_cast<int>( query.size() );
-    int ref_begin  = 0;
-    int ref_span   = 0;
-    int query_span = 0;
-    int cur_op_idx = 0;
-
-    // Step 1: count leading WFA2-I ops (= SAM-D, free-end reference clips before alignment)
-    while( cur_op_idx < cigar_length && (cigar_buffer[cur_op_idx] & 0xF) == CigarOp::I ) {
-        ref_begin += static_cast<int>( cigar_buffer[cur_op_idx] >> 4 );
-        ++cur_op_idx;
-    }
-
-    // Step 2: process remaining ops — swap I↔D, track ref/query span, copy to output vector
-    std::vector<uint32_t> cigar;
-    cigar.reserve( static_cast<size_t>( cigar_length - cur_op_idx ));
-    for( ; cur_op_idx < cigar_length; ++cur_op_idx ) {
-        uint32_t op  = cigar_buffer[cur_op_idx] & 0xF;
-        uint32_t len = cigar_buffer[cur_op_idx] >> 4;
-
-        // Swap WFA2 convention → SAM convention
-        if( op == CigarOp::I ) {
-            op = CigarOp::D;  // WFA2-I (ref-consuming) → SAM D
-        } else if( op == CigarOp::D ) {
-            op = CigarOp::I;  // WFA2-D (query-consuming) → SAM I
-        } else if( op != CigarOp::M && op != CigarOp::E && op != CigarOp::X ) {
-            throw std::logic_error( "wfa2: unexpected CIGAR op code " + std::to_string( op ));
-        }
-
-        // SAM: M, D, E, X consume reference; M, I, E, X consume query
-        if( op == CigarOp::M || op == CigarOp::D || op == CigarOp::E || op == CigarOp::X ) {
-            ref_span   += static_cast<int>( len );
-        }
-        if( op == CigarOp::M || op == CigarOp::I || op == CigarOp::E || op == CigarOp::X ) {
-            query_span += static_cast<int>( len );
-        }
-
-        cigar.push_back( (len << 4) | op );
-    }
-
-    // Step 3: trim trailing SAM-D ops — these were WFA2-I trailing reference clips
-    while( !cigar.empty() && (cigar.back() & 0xF) == CigarOp::D ) {
-        ref_span -= static_cast<int>( cigar.back() >> 4 );
-        cigar.pop_back();
-    }
-
-    int const ref_end = ref_begin + ref_span;
-
-    // Step 4: sanity checks — catch any CIGAR/coordinate inconsistency
-    if( query_span != qlen ) {
-        throw std::logic_error(
-            "wfa2: CIGAR query span " + std::to_string( query_span ) +
-            " != query length "       + std::to_string( qlen )
-        );
-    }
-    if( ref_end != cig->end_h ) {
-        throw std::logic_error(
-            "wfa2: ref_end " + std::to_string( ref_end ) +
-            " != end_h "     + std::to_string( cig->end_h )
-        );
-    }
+    // Parse WFA2's raw per-base backtrace directly into a SAM-compliant CIGAR: this
+    // handles the WFA2-vs-SAM I/D convention swap (https://github.com/smarco/WFA2-lib/issues/46),
+    // the free-end reference clip trimming, and (for the aDNA damage-aware model) correctly
+    // reports tolerated C→T/G→A substitutions as mismatches in the CIGAR even though they scored
+    // as matches. See wfa2_cigar.hpp for why this bypasses WFA2's own cigar_get_CIGAR().
+    std::string_view const ops(
+        cig->operations + cig->begin_offset,
+        static_cast<std::size_t>( cig->end_offset - cig->begin_offset )
+    );
+    auto built = build_sam_cigar_from_wfa2_ops(
+        ops, query, target, impl_->settings.use_extended_cigar
+    );
+    assert( built.ref_end == cig->end_h && "wfa2: ref_end does not match WFA2 end_h" );
 
     return Wfa2Result{
-        .ref_begin = ref_begin,
-        .ref_end   = ref_end,
-        .score     = cig->score,
-        .status    = Wfa2Result::Status::Ok,
-        .cigar     = std::move( cigar ),
+        .ref_begin     = built.ref_begin,
+        .ref_end       = built.ref_end,
+        .score         = cig->score,
+        .status        = Wfa2Result::Status::Ok,
+        .cigar         = std::move( built.cigar ),
+        .edit_distance = built.edit_distance,
     };
 }
 
