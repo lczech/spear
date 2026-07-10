@@ -70,17 +70,17 @@ struct InvertedIndexStats
  *
  * Per-interval histograms (one entry per interval across all queries):
  *
- *   interval_length_histogram[n]  : number of intervals with v_right - v_left == n
+ *   interval_length_histogram[n]  : number of intervals with right - left == n
  *   peak_count_histogram[n]       : number of intervals whose peak distinct-list count == n
  *
  * Per-query histograms (one entry per accumulate() call, e.g. per read):
  *
- *   max_peak_histogram[n]              : number of queries whose best interval had peak_count == n;
+ *   max_peak_histogram[n]              : number of queries whose best interval had peak_hits == n;
  *                                        n == 0 means the query returned no intervals at all
- *                                        (the read produced no hit above the M threshold)
+ *                                        (the read produced no hit above the min_hit_count threshold)
  *   intervals_per_query_histogram[n]   : number of queries that returned exactly n intervals;
  *                                        n == 0 counts unmapped reads directly
- *   total_evidence_histogram[n]        : number of queries whose sum of peak_counts across all
+ *   total_evidence_histogram[n]        : number of queries whose sum of peak_hits across all
  *                                        intervals equals n; distinguishes a read with one strong
  *                                        hit (low sum, high max_peak) from one with many weak hits
  *                                        (high sum, low max_peak) typical of repetitive regions
@@ -118,10 +118,10 @@ struct HitCollectorStats
  *
  * Per-interval: interval_length_histogram and peak_count_histogram are updated for every interval.
  * Per-query: intervals_per_query_histogram is updated with the number of intervals returned;
- * max_peak_histogram is updated with the highest peak_count seen (0 if no intervals).
+ * max_peak_histogram is updated with the highest peak_hits seen (0 if no intervals).
  *
  * @p intervals is typically the output vector from HitCollector::query(); any type whose
- * elements expose `v_left`, `v_right`, and `peak_count` fields is accepted.
+ * elements expose `left`, `right`, and `peak_hits` fields is accepted.
  */
 template<typename HitInterval>
 void accumulate( HitCollectorStats& stats, std::vector<HitInterval> const& intervals )
@@ -142,12 +142,12 @@ void accumulate( HitCollectorStats& stats, std::vector<HitInterval> const& inter
     std::size_t max_peak       = 0;
     std::size_t total_evidence = 0;
     for( auto const& iv : intervals ) {
-        auto const pc = static_cast<std::size_t>( iv.peak_count );
+        auto const pc = static_cast<std::size_t>( iv.peak_hits );
         if( pc > max_peak ) {
             max_peak = pc;
         }
         total_evidence += pc;
-        tally( stats.interval_length_histogram, static_cast<std::size_t>( iv.v_right - iv.v_left ));
+        tally( stats.interval_length_histogram, static_cast<std::size_t>( iv.right - iv.left ));
         tally( stats.peak_count_histogram, pc );
         ++stats.total_intervals;
     }

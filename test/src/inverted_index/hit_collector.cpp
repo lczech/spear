@@ -265,8 +265,8 @@ TEST( HitCollector, SingleListM1 )
     HC hc;
     auto r = hc.query( tp, 5, 1 );
     ASSERT_EQ( r.size(), 1u );
-    EXPECT_EQ( r[0].v_left,  10u );
-    EXPECT_EQ( r[0].v_right, 30u );
+    EXPECT_EQ( r[0].left,  10u );
+    EXPECT_EQ( r[0].right, 30u );
 }
 
 // Two lists that never share a window → no intervals.
@@ -292,8 +292,8 @@ TEST( HitCollector, TwoListsOneInterval )
     HC hc;
     auto r = hc.query( tp, 5, 2 );
     ASSERT_EQ( r.size(), 1u );
-    EXPECT_EQ( r[0].v_left,  1u );
-    EXPECT_EQ( r[0].v_right, 7u );
+    EXPECT_EQ( r[0].left,  1u );
+    EXPECT_EQ( r[0].right, 7u );
 }
 
 // Dense overlap collapses into one maximal interval.
@@ -305,8 +305,8 @@ TEST( HitCollector, MaximalIntervalDenseOverlap )
     HC hc;
     auto r = hc.query( tp, 3, 2 );
     ASSERT_EQ( r.size(), 1u );
-    EXPECT_EQ( r[0].v_left,  1u );
-    EXPECT_EQ( r[0].v_right, 7u );
+    EXPECT_EQ( r[0].left,  1u );
+    EXPECT_EQ( r[0].right, 7u );
 }
 
 // Wide gap (>> L) between two shared clusters produces two intervals.
@@ -321,10 +321,10 @@ TEST( HitCollector, TwoIntervalsWideGap )
     HC hc;
     auto r = hc.query( tp, 5, 2 );
     ASSERT_EQ( r.size(), 2u );
-    EXPECT_EQ( r[0].v_left,  1u );
-    EXPECT_EQ( r[0].v_right, 3u );
-    EXPECT_EQ( r[1].v_left,  18u );
-    EXPECT_EQ( r[1].v_right, 20u );
+    EXPECT_EQ( r[0].left,  1u );
+    EXPECT_EQ( r[0].right, 3u );
+    EXPECT_EQ( r[1].left,  18u );
+    EXPECT_EQ( r[1].right, 20u );
 }
 
 // Narrow gap (< L) where the hit count drops below M and then recovers → two intervals.
@@ -340,10 +340,10 @@ TEST( HitCollector, TwoIntervalsNarrowGapCountDrop )
     HC hc;
     auto r = hc.query( tp, 5, 2 );
     ASSERT_EQ( r.size(), 2u );
-    EXPECT_EQ( r[0].v_left,  1u );
-    EXPECT_EQ( r[0].v_right, 4u );
-    EXPECT_EQ( r[1].v_left,  7u );
-    EXPECT_EQ( r[1].v_right, 10u );
+    EXPECT_EQ( r[0].left,  1u );
+    EXPECT_EQ( r[0].right, 4u );
+    EXPECT_EQ( r[1].left,  7u );
+    EXPECT_EQ( r[1].right, 10u );
 }
 
 // Same value arriving from multiple lists must be deduplicated via the tail-check path
@@ -357,8 +357,8 @@ TEST( HitCollector, DedupSameValueMultipleLists )
     HC hc;
     auto r = hc.query( tp, 5, 3 );
     ASSERT_EQ( r.size(), 1u );
-    EXPECT_EQ( r[0].v_left,  5u );
-    EXPECT_EQ( r[0].v_right, 5u );
+    EXPECT_EQ( r[0].left,  5u );
+    EXPECT_EQ( r[0].right, 5u );
 }
 
 // Values exactly L apart are within the same window (val - front == L, condition is <=).
@@ -370,8 +370,8 @@ TEST( HitCollector, WindowBoundaryExactlyL )
     HC hc;
     auto r = hc.query( tp, 5, 2 );
     ASSERT_EQ( r.size(), 1u );
-    EXPECT_EQ( r[0].v_left,  1u );
-    EXPECT_EQ( r[0].v_right, 6u );
+    EXPECT_EQ( r[0].left,  1u );
+    EXPECT_EQ( r[0].right, 6u );
 }
 
 // Values L+1 apart are just outside the window → no interval.
@@ -396,8 +396,8 @@ TEST( HitCollector, ThreeListsMPartial )
     HC hc;
     auto r = hc.query( tp, 3, 2 );
     ASSERT_EQ( r.size(), 1u );
-    EXPECT_EQ( r[0].v_left,  1u );
-    EXPECT_EQ( r[0].v_right, 4u );
+    EXPECT_EQ( r[0].left,  1u );
+    EXPECT_EQ( r[0].right, 4u );
 }
 
 // Smoke test: uint32_t instantiation compiles and produces correct results.
@@ -409,8 +409,8 @@ TEST( HitCollector, Uint32Instantiation )
     HitCollector<std::uint32_t, 16> hc;
     auto r = hc.query( tp, 3u, 2 );
     ASSERT_EQ( r.size(), 1u );
-    EXPECT_EQ( r[0].v_left,  1u );
-    EXPECT_EQ( r[0].v_right, 4u );
+    EXPECT_EQ( r[0].left,  1u );
+    EXPECT_EQ( r[0].right, 4u );
 }
 
 // Out-parameter overload reuses the vector allocation across calls.
@@ -424,7 +424,7 @@ TEST( HitCollector, OutParamOverloadReusesVector )
     out.reserve( 8 ); // set a capacity that should survive across calls
     hc.query( tp, 3, 2, out );
     ASSERT_EQ( out.size(), 1u );
-    EXPECT_EQ( out[0].v_left, 1u );
+    EXPECT_EQ( out[0].left, 1u );
     EXPECT_GE( out.capacity(), 1u ); // capacity preserved (not shrunk)
 }
 
@@ -495,6 +495,6 @@ TEST( HitCollectorPerf, DenseLists )
 
     // Dense identical lists: one interval from 0 to N-1.
     ASSERT_EQ( out.size(), 1u );
-    EXPECT_EQ( out[0].v_left,  0u );
-    EXPECT_EQ( out[0].v_right, N - 1 );
+    EXPECT_EQ( out[0].left,  0u );
+    EXPECT_EQ( out[0].right, N - 1 );
 }

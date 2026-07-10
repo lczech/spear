@@ -96,18 +96,18 @@ public:
     using position_type = PositionT;
 
     /**
-     * @brief A maximal interval [v_left, v_right] where the hit condition is continuously met.
+     * @brief A maximal interval [left, right] where the hit condition is continuously met.
      *
      * Every window of size window_length placed within this interval captures at least
      * min_hit_count distinct lists.
-     * `peak_count` is the maximum distinct-list count seen across all window positions within
+     * `peak_hits` is the maximum distinct-list count seen across all window positions within
      * the interval; used to sort results by strength (highest peak first).
      */
     struct HitInterval
     {
-        PositionT   v_left;
-        PositionT   v_right;
-        std::size_t peak_count = 0;
+        PositionT   left;
+        PositionT   right;
+        std::size_t peak_hits = 0;
     };
 
     // -------------------------------------------------------------------------
@@ -116,7 +116,7 @@ public:
 
     /**
      * @brief Find all maximal hit intervals; results are appended to @p hit_intervals
-     * (cleared first), and sorted by peak_count descending, then v_left ascending.
+     * (cleared first), and sorted by peak_hits descending, then left ascending.
      *
      * @param term_postings   Populated TermPostings collection.
      * @param window_length   Window length: a window [x, x+window_length] must cover values
@@ -170,6 +170,7 @@ public:
         // Ring access helpers
         auto ring_size  = [&]() noexcept
         {
+            assert( ring_tail >= ring_head );
             return ring_tail - ring_head;
         };
         auto ring_front = [&]() noexcept -> WindowEntry&
@@ -246,9 +247,13 @@ public:
         }
 
         // Sort by peak_count descending: strongest regions first
-        std::sort( hit_intervals.begin(), hit_intervals.end(), []( HitInterval const& a, HitInterval const& b ) {
-            return a.peak_count > b.peak_count;
-        });
+        std::sort(
+            hit_intervals.begin(),
+            hit_intervals.end(),
+            []( HitInterval const& a, HitInterval const& b ) {
+                return a.peak_hits > b.peak_hits;
+            }
+        );
     }
 
     /**
