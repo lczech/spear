@@ -230,11 +230,10 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/test)
 # We have to use LTO for spear as well for some compilers to properly link, I think.
 if(GENESIS_HAS_LTO)
     message(STATUS "Building with LTO/IPO support")
-    set_property(TARGET spear       PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    set_property(TARGET spear_test  PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    # wfa2_static intentionally excluded: LTO bitcode archives cannot be linked by targets
-    # built without LTO (e.g. future test binaries). WFA2's vectorization happens at compile
-    # time within its own TUs; cross-module LTO inlining at our call boundary adds little.
+    set_property(TARGET spear            PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET spear_test       PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET spear_lib_obj    PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET spear_lib_static PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 else()
     message(STATUS "Building without LTO/IPO support")
 endif()
