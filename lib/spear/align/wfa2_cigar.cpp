@@ -26,6 +26,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <stdexcept>
 
 namespace spear::align {
 
@@ -63,7 +64,7 @@ Wfa2CigarResult build_sam_cigar_from_wfa2_ops(
     }
 
     // Single forward pass over the real alignment: swap WFA2's pattern/text convention
-    // to SAM (I<->D), resolve 'M' into '='/X by comparing sequences, and RLE-encode.
+    // to SAM (I<->D), resolve M into =/X by comparing sequences, and RLE-encode.
     int q = 0;
     int r = result.ref_begin;
     for( std::size_t i = begin; i < end; ++i ) {
@@ -94,7 +95,7 @@ Wfa2CigarResult build_sam_cigar_from_wfa2_ops(
         } else {
             // WFA2 gap-affine backtrace only ever emits M/X/I/D; anything else means our
             // understanding of WFA2's contract has changed and needs re-checking.
-            assert( false && "build_sam_cigar_from_wfa2_ops: unexpected WFA2 op code" );
+            throw std::logic_error( "build_sam_cigar_from_wfa2_ops: unexpected WFA2 op code" );
         }
     }
 
