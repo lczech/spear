@@ -42,6 +42,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <span>
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
@@ -145,23 +146,23 @@ public:
     /**
      * @brief Cumulative statistics across all queries run through this engine.
      *
-     * Thread-safe: all fields are atomics incremented from finish_query().
-     * Access via stats() after all threads have finished.
+     * Plain value snapshot returned by stats(); see AtomicStats for the atomics
+     * this is derived from. Safe to copy, print, and pass around freely.
      */
     struct Stats
     {
         /// Total number of finish_query() calls.
-        std::atomic<std::uint64_t> total_queries     = 0;
+        std::uint64_t total_queries     = 0;
 
         /// Queries where the read had more than kMaxKmersPerRead k-mers;
         /// only the first kMaxKmersPerRead were seeded.
-        std::atomic<std::uint64_t> truncated_queries = 0;
+        std::uint64_t truncated_queries = 0;
 
         /// Cumulative k-mers skipped due to max_occurrences_per_kmer across all queries.
-        std::atomic<std::uint64_t> soft_capped_kmers = 0;
+        std::uint64_t soft_capped_kmers = 0;
 
         /// Queries that returned no seed intervals (read did not map).
-        std::atomic<std::uint64_t> empty_queries     = 0;
+        std::uint64_t empty_queries     = 0;
     };
 
     // -------------------------------------------------------------------------
@@ -386,18 +387,64 @@ public:
         return Query( *this, term_postings, hit_collector, index_ );
     }
 
+    /**
+     * @brief Run one seeding query in a single call, for callers that already hold all of a
+     * read's k-mers in a contiguous container (as opposed to streaming them one at a time).
+     *
+     * Equivalent to calling start_query(), add_kmer() for each element of @p kmers, then
+     * finish_query( read_length, out ). If @p kmers exceeds kMaxKmersPerRead, seeding uses
+     * only the first kMaxKmersPerRead entries and the truncation is recorded in stats(), same
+     * as the streaming API.
+     *
+     * @param kmers        Encoded k-mer indices for the read, in order.
+     * @param read_length  Length of the read in bases; used to auto-derive the window length.
+     * @param out          Output vector; cleared then filled with seed intervals sorted by
+     *                     peak_hits descending.
+     */
+    void run_query(
+        std::span<kmer_index_type const> kmers,
+        std::size_t                      read_length,
+        std::vector<SeedInterval>&       out
+    ) const {
+        auto q = start_query();
+        for( auto const kmer : kmers ) {
+            if( !q.add_kmer( kmer ) ) {
+                break; // truncated_ already flagged by add_kmer; further calls are no-ops
+            }
+        }
+        q.finish_query( read_length, out );
+    }
+
+    /**
+     * @brief Convenience overload of run_query() returning results by value.
+     *
+     * Prefer the out-parameter overload with a reused thread_local vector to avoid
+     * per-query allocation on the hot path.
+     */
+    std::vector<SeedInterval> run_query( std::span<kmer_index_type const> kmers, std::size_t read_length ) const
+    {
+        std::vector<SeedInterval> out;
+        run_query( kmers, read_length, out );
+        return out;
+    }
+
     // -------------------------------------------------------------------------
     //     Stats
     // -------------------------------------------------------------------------
 
     /**
-     * @brief Cumulative statistics across all finish_query() calls on this engine.
+     * @brief Snapshot of cumulative statistics across all finish_query() calls on this engine.
      *
-     * Safe to read from any thread after all queries have completed.
+     * Safe to call from any thread; typically read after all queries have completed.
      */
-    Stats const& stats() const noexcept
+    Stats stats() const noexcept
     {
-        return stats_;
+        Stats s;
+        s.total_queries     = stats_.total_queries.load( std::memory_order_relaxed );
+        s.truncated_queries = stats_.truncated_queries.load( std::memory_order_relaxed );
+        s.soft_capped_kmers = stats_.soft_capped_kmers.load( std::memory_order_relaxed );
+        s.empty_queries     = stats_.empty_queries.load( std::memory_order_relaxed );
+        return s;
     }
 
     // -------------------------------------------------------------------------
@@ -440,8 +487,19 @@ private:
     spear::inverted_index::InvertedIndex<PositionT> const& index_;
     std::size_t bin_width_;
 
+    // Atomic counterpart of Stats, incremented from finish_query(); stats() loads these
+    // (relaxed) into a plain Stats snapshot for callers. Kept internal so callers never
+    // have to deal with atomics directly (can't copy/print/return an atomic by value).
+    struct AtomicStats
+    {
+        std::atomic<std::uint64_t> total_queries     = 0;
+        std::atomic<std::uint64_t> truncated_queries = 0;
+        std::atomic<std::uint64_t> soft_capped_kmers = 0;
+        std::atomic<std::uint64_t> empty_queries     = 0;
+    };
+
     // Mutable so Query (which holds KmerSeeding const&) can increment atomics in finish_query().
-    mutable Stats stats_;
+    mutable AtomicStats stats_;
 };
 
 } // namespace spear::seeding
