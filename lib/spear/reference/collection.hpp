@@ -179,49 +179,56 @@ public:
     /**
      * @brief Return true if no sequences have been added.
      */
-    bool empty() const {
+    bool empty() const
+    {
         return sequences_.empty();
     }
 
     /**
      * @brief Return the number of sequences in the collection.
      */
-    std::size_t size() const {
+    std::size_t size() const
+    {
         return sequences_.size();
     }
 
     /**
      * @brief Return the SequenceRecord at @p index without bounds checking.
      */
-    SequenceRecord const& operator[]( std::size_t index ) const {
+    SequenceRecord const& operator[]( std::size_t index ) const
+    {
         return sequences_[index];
     }
 
     /**
      * @brief Return the SequenceRecord at @p index with bounds checking.
      */
-    SequenceRecord const& at( std::size_t index ) const {
+    SequenceRecord const& at( std::size_t index ) const
+    {
         return sequences_.at( index );
     }
 
     /**
      * @brief Return the list of source FASTA file paths, in order of first appearance.
      */
-    std::vector<std::string> const& fasta_files() const {
+    std::vector<std::string> const& fasta_files() const
+    {
         return fasta_files_;
     }
 
     /**
      * @brief Return the source FASTA file path at @p index.
      */
-    std::string const& fasta_file( std::size_t index ) const {
+    std::string const& fasta_file( std::size_t index ) const
+    {
         return fasta_files_.at( index );
     }
 
     /**
      * @brief Return all SequenceRecord entries.
      */
-    std::vector<SequenceRecord> const& sequences() const {
+    std::vector<SequenceRecord> const& sequences() const
+    {
         return sequences_;
     }
 
@@ -231,14 +238,16 @@ public:
      * The sequence occupies global positions
      * [global_offset_of(i), global_offset_of(i) + sequences()[i].length).
      */
-    std::size_t global_offset_of( std::size_t index ) const {
+    std::size_t global_offset_of( std::size_t index ) const
+    {
         return offsets_[index];
     }
 
     /**
      * @brief Return the total number of bases across all sequences.
      */
-    std::size_t total_length() const {
+    std::size_t total_length() const
+    {
         return offsets_.back();
     }
 

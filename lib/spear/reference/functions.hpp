@@ -63,6 +63,28 @@ ReferenceCollection build_collection(
 );
 
 // =================================================================================================
+//     Validation
+// =================================================================================================
+
+/**
+ * @brief Check whether two ReferenceCollections describe the same sequences in the same order.
+ *
+ * Compares sequence count, order, canonical name() (the first whitespace-delimited token of
+ * the header, not the full header text), and length for each entry. Sequence content (sites)
+ * and file_index are not compared.
+ *
+ * Intended to check that a reference reloaded at alignment time (e.g. via build_collection()
+ * with store_sites = true) still matches the reference an index was built against -- since
+ * genomic coordinates baked into an index depend on both the order and length of each sequence,
+ * a mismatch here means those coordinates would silently map to the wrong reference positions.
+ * Returns a bool rather than throwing, so the caller decides how to react to a mismatch.
+ */
+bool reference_collections_match(
+    ReferenceCollection const& a,
+    ReferenceCollection const& b
+);
+
+// =================================================================================================
 //     JSON I/O
 // =================================================================================================
 

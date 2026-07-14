@@ -493,3 +493,76 @@ TEST(BuildCollection, StoreSites)
     EXPECT_EQ( col[0].sites, "ACGT" );
     EXPECT_EQ( col[1].sites, "GGCC" );
 }
+
+// =================================================================================================
+//     reference_collections_match()
+// =================================================================================================
+
+TEST(ReferenceCollectionsMatch, IdenticalCollectionsMatch)
+{
+    ReferenceCollection a;
+    a.add( "ref.fa", "chr1 description", 100u );
+    a.add( "ref.fa", "chr2", 200u );
+
+    ReferenceCollection b;
+    b.add( "other/path/ref.fa", "chr1 different description", 100u );
+    b.add( "other/path/ref.fa", "chr2", 200u );
+
+    // fasta_files()/file_index/full header text are deliberately not compared: only name(),
+    // length, and order matter for coordinate correctness.
+    EXPECT_TRUE( reference_collections_match( a, b ) );
+}
+
+TEST(ReferenceCollectionsMatch, BothEmptyMatch)
+{
+    ReferenceCollection a;
+    ReferenceCollection b;
+    EXPECT_TRUE( reference_collections_match( a, b ) );
+}
+
+TEST(ReferenceCollectionsMatch, DifferentCountDoesNotMatch)
+{
+    ReferenceCollection a;
+    a.add( "ref.fa", "chr1", 100u );
+    a.add( "ref.fa", "chr2", 200u );
+
+    ReferenceCollection b;
+    b.add( "ref.fa", "chr1", 100u );
+
+    EXPECT_FALSE( reference_collections_match( a, b ) );
+}
+
+TEST(ReferenceCollectionsMatch, DifferentOrderDoesNotMatch)
+{
+    ReferenceCollection a;
+    a.add( "ref.fa", "chr1", 100u );
+    a.add( "ref.fa", "chr2", 200u );
+
+    ReferenceCollection b;
+    b.add( "ref.fa", "chr2", 200u );
+    b.add( "ref.fa", "chr1", 100u );
+
+    EXPECT_FALSE( reference_collections_match( a, b ) );
+}
+
+TEST(ReferenceCollectionsMatch, DifferentNameDoesNotMatch)
+{
+    ReferenceCollection a;
+    a.add( "ref.fa", "chr1", 100u );
+
+    ReferenceCollection b;
+    b.add( "ref.fa", "chr1_renamed", 100u );
+
+    EXPECT_FALSE( reference_collections_match( a, b ) );
+}
+
+TEST(ReferenceCollectionsMatch, DifferentLengthDoesNotMatch)
+{
+    ReferenceCollection a;
+    a.add( "ref.fa", "chr1", 100u );
+
+    ReferenceCollection b;
+    b.add( "ref.fa", "chr1", 101u );
+
+    EXPECT_FALSE( reference_collections_match( a, b ) );
+}

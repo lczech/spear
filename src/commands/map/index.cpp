@@ -207,6 +207,13 @@ void run_map_index_impl( MapIndexOptions const& options )
     auto const& fasta_paths = options.fasta.file_paths();
     for( auto const& fasta_path : fasta_paths ) {
         LOG_MSG1 << "Processing file " << fasta_path;
+
+        // Absolute, symlink-resolved path recorded in the reference collection (and hence the
+        // manifest), so that `spear map align` can later reliably reload this same file
+        // regardless of its own working directory -- unlike fasta_path itself, which may be
+        // relative to whatever directory this command happened to be run from.
+        auto const canonical_fasta_path = core::real_path( fasta_path );
+
         auto fasta_input = FastaInputStream( io::from_file( fasta_path ));
         fasta_input.reader().validate_labels( false );
         for( auto& sequence : fasta_input ) {
@@ -228,7 +235,7 @@ void run_map_index_impl( MapIndexOptions const& options )
             }
 
             // Record the sequence in the reference collection (length-only; sites not needed here).
-            reference_col.add( fasta_path, sequence.label(), seq_length );
+            reference_col.add( canonical_fasta_path, sequence.label(), seq_length );
 
             // Process the k-mers of this sequence in a separate thread.
             auto seq_str = std::make_shared<std::string>( std::move( sequence.sites() ));

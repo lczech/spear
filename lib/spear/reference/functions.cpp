@@ -95,6 +95,27 @@ ReferenceCollection build_collection(
 }
 
 // =================================================================================================
+//     Validation
+// =================================================================================================
+
+bool reference_collections_match(
+    ReferenceCollection const& a,
+    ReferenceCollection const& b
+) {
+    if( a.size() != b.size() ) {
+        return false;
+    }
+    for( std::size_t i = 0; i < a.size(); ++i ) {
+        auto const& sa = a[i];
+        auto const& sb = b[i];
+        if( sa.name() != sb.name() || sa.length != sb.length ) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// =================================================================================================
 //     JSON I/O
 // =================================================================================================
 
