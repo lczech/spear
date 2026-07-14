@@ -70,10 +70,9 @@ debug:
 # Special make that also includes new files.
 # We first touch all inner CMake files so that their glob search for files is rerun.
 # This ensures that all new files are compiled, even when doing incremental builds.
-update:
+update: build/CMakeCache.txt
 	@echo "Running make with new files..."
 	@touch CMakeLists.txt
-	# if genesis exists as a submodule, touch it as well
 	@if [ -d libs/genesis ]; then touch libs/genesis/CMakeLists.txt; fi
 	$(MAKE) -s -C build
 .PHONY: update
