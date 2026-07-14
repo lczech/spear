@@ -940,7 +940,7 @@ TEST( KmerSeedingConcurrent, Deterministic )
 // completion and the pool's queue is barely touched, which says little about the threading
 // model itself. Submitting one detached task per query instead exercises the pool's actual
 // production usage pattern -- a single producer thread enqueuing one task per unit of work
-// (mirroring commands/map/locate.cpp, which enqueues one detached task per read), consumed by
+// (mirroring commands/map/align.cpp, which enqueues one detached task per read), consumed by
 // kNumThreads workers pulling from the shared queue -- and puts real, sustained pressure on the
 // queue's enqueue/dequeue synchronization instead of just running kNumThreads independent loops.
 // TEST( KmerSeedingConcurrent, StressPerf )

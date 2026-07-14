@@ -57,8 +57,9 @@ static inline int damage_match_fn( int v, int h, void* args_ )
     auto const  q = static_cast<unsigned char>( a->query[v]  );
     auto const  r = static_cast<unsigned char>( a->target[h] );
     return (q == r)
-         | (( q == 'T' ) & ( r == 'C' ) & ( v <  a->ct_end   ))
-         | (( q == 'A' ) & ( r == 'G' ) & ( v >= a->ga_start ));
+        || (( v <  a->ct_end   ) && ( q == 'T' ) && ( r == 'C' ))
+        || (( v >= a->ga_start ) && ( q == 'A' ) && ( r == 'G' ))
+    ;
 }
 
 // =================================================================================================
@@ -73,23 +74,27 @@ struct Wfa2Aligner::Impl
 
     explicit Impl( Wfa2Settings s )
         : settings( s )
-        , damage_enabled( s.damage_ct_end != 0 || s.damage_ga_start != 0 )
+        , damage_enabled( s.damage_ct_5p_reach != 0 || s.damage_ga_3p_reach != 0 )
     {
-        // Validity check
-        if( s.mismatch < 0 ) {
-            throw std::invalid_argument( "Wfa2Settings::mismatch must be >= 0" );
+        // Validity check. mismatch and gap_extend must be strictly positive, and gap_open must
+        // be non-negative: WFA2's own wavefront_penalties_set_affine() (wavefront_penalties.c)
+        // enforces exactly this and calls exit(1) -- an uncatchable hard process abort, not a
+        // C++ exception -- if violated, so we must reject out-of-range values before it gets
+        // that far.
+        if( s.mismatch <= 0 ) {
+            throw std::invalid_argument( "Wfa2Settings::mismatch must be > 0" );
         }
         if( s.gap_open < 0 ) {
             throw std::invalid_argument( "Wfa2Settings::gap_open must be >= 0" );
         }
-        if( s.gap_extend < 0 ) {
-            throw std::invalid_argument( "Wfa2Settings::gap_extend must be >= 0" );
+        if( s.gap_extend <= 0 ) {
+            throw std::invalid_argument( "Wfa2Settings::gap_extend must be > 0" );
         }
-        if( s.damage_ct_end < 0 ) {
-            throw std::invalid_argument( "Wfa2Settings::damage_ct_end must be >= 0" );
+        if( s.damage_ct_5p_reach < 0 ) {
+            throw std::invalid_argument( "Wfa2Settings::damage_ct_5p_reach must be >= 0" );
         }
-        if( s.damage_ga_start < 0 ) {
-            throw std::invalid_argument( "Wfa2Settings::damage_ga_start must be >= 0" );
+        if( s.damage_ga_3p_reach < 0 ) {
+            throw std::invalid_argument( "Wfa2Settings::damage_ga_3p_reach must be >= 0" );
         }
         if( s.max_steps < 0 ) {
             throw std::invalid_argument( "Wfa2Settings::max_steps must be >= 0" );
@@ -136,10 +141,12 @@ struct Wfa2Aligner::Impl
         int const tlen = static_cast<int>( target.size() );
         wavefront_aligner_set_alignment_free_ends( wfa, 0, 0, tlen, tlen );
         if( damage_enabled ) {
+            // damage_ga_3p_reach is a length-invariant base count (like damage_ct_5p_reach), so the
+            // absolute threshold it maps to must be recomputed per read from that read's own qlen.
             DamageArgs args{
                 query.c_str(), target.c_str(),
-                settings.damage_ct_end,
-                settings.damage_ga_start
+                settings.damage_ct_5p_reach,
+                qlen - settings.damage_ga_3p_reach
             };
             return wavefront_align_lambda( wfa, damage_match_fn, &args, qlen, tlen );
         }

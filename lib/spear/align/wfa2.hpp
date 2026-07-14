@@ -43,10 +43,13 @@ namespace spear::align {
  * target (reference window) are free. Gap-affine penalties follow the
  * Smith-Waterman-Gotoh model with a fixed match cost of 0.
  *
- * aDNA damage tolerance is enabled by setting non-zero zone sizes: bases within
- * @p damage_ct_end of the 5' end and @p damage_ga_start of the 3' end use a
- * custom match function that treats C→T and G→A substitutions as free matches,
- * respectively. When both zone sizes are zero the standard match function is used.
+ * aDNA damage tolerance is enabled by setting non-zero zone sizes: the first
+ * @p damage_ct_5p_reach bases from the 5' end and the last @p damage_ga_3p_reach bases from
+ * the 3' end use a custom match function that treats C→T and G→A substitutions as free matches,
+ * respectively. Both are read-length-invariant base counts, recomputed against each read's
+ * actual length at alignment time (not absolute indices fixed at construction), since one
+ * Wfa2Aligner instance is normally reused across many reads of varying length. When both zone
+ * sizes are zero the standard match function is used.
  */
 struct Wfa2Settings
 {
@@ -73,10 +76,10 @@ struct Wfa2Settings
 
     /// Number of bases from the 5' end where C→T is treated as a free match.
     /// Set to 0 to disable (default).
-    int damage_ct_end   = 0;
+    int damage_ct_5p_reach = 0;
     /// Number of bases from the 3' end where G→A is treated as a free match.
     /// Set to 0 to disable (default).
-    int damage_ga_start = 0;
+    int damage_ga_3p_reach = 0;
 
     /**
      * @brief Maximum alignment score (WFA steps) before aborting.

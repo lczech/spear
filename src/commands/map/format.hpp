@@ -85,7 +85,7 @@ struct MapIndexMetadata
  *
  * Combines the index build parameters (MapIndexMetadata) with the reference sequence catalog
  * (ReferenceCollection). Written by `spear map index` via manifest_to_json(), read by
- * `spear map locate` (and future commands) via manifest_from_json().
+ * `spear map align` (and future commands) via manifest_from_json().
  *
  * The JSON has two top-level sub-objects:
  *   - `"index"`:     MapIndexMetadata, serialised by metadata_to_json().

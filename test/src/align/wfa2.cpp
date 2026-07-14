@@ -74,6 +74,32 @@ TEST( Wfa2Settings, NegativeMaxStepsThrows )
     EXPECT_THROW( Wfa2Aligner{ s }, std::invalid_argument );
 }
 
+// mismatch and gap_extend must be strictly positive: WFA2's own wavefront_penalties_set_affine()
+// hard-exits the process (not a catchable exception) on mismatch <= 0 or gap_extension <= 0, so
+// our own validation must reject 0 here rather than only negative values.
+
+TEST( Wfa2Settings, ZeroMismatchThrows )
+{
+    Wfa2Settings s;
+    s.mismatch = 0;
+    EXPECT_THROW( Wfa2Aligner{ s }, std::invalid_argument );
+}
+
+TEST( Wfa2Settings, ZeroGapExtendThrows )
+{
+    Wfa2Settings s;
+    s.gap_extend = 0;
+    EXPECT_THROW( Wfa2Aligner{ s }, std::invalid_argument );
+}
+
+// Unlike mismatch/gap_extend, gap_open == 0 is explicitly allowed by WFA2 (O>=0).
+TEST( Wfa2Settings, ZeroGapOpenDoesNotThrow )
+{
+    Wfa2Settings s;
+    s.gap_open = 0;
+    EXPECT_NO_THROW( Wfa2Aligner{ s } );
+}
+
 // =================================================================================================
 //     Wrong-scope guards
 // =================================================================================================
@@ -420,8 +446,8 @@ TEST( Wfa2Damage, CT5PrimeTreatedAsMatch )
 {
     // Position 0: read=T, ref=C → C→T deamination damage; should score as perfect match.
     Wfa2Settings s;
-    s.scope         = Wfa2Settings::Scope::Score;
-    s.damage_ct_end = 3;  // zone covers positions 0, 1, 2
+    s.scope              = Wfa2Settings::Scope::Score;
+    s.damage_ct_5p_reach = 3;  // zone covers positions 0, 1, 2
     Wfa2Aligner aligner{ s };
 
     auto const r = aligner.align_score( "TACGT", "CACGT" );
@@ -431,10 +457,10 @@ TEST( Wfa2Damage, CT5PrimeTreatedAsMatch )
 
 TEST( Wfa2Damage, CT5PrimeOutsideZonePenalised )
 {
-    // Same C→T substitution but at position 3, outside the ct_end=2 zone → regular mismatch.
+    // Same C→T substitution but at position 3, outside the ct_5p_reach=2 zone → regular mismatch.
     Wfa2Settings s;
-    s.scope         = Wfa2Settings::Scope::Score;
-    s.damage_ct_end = 2;  // zone covers positions 0, 1 only
+    s.scope              = Wfa2Settings::Scope::Score;
+    s.damage_ct_5p_reach = 2;  // zone covers positions 0, 1 only
     Wfa2Aligner aligner{ s };
 
     auto const r = aligner.align_score( "ACGTA", "ACGCA" );  // pos 3: T vs C, outside zone
@@ -446,8 +472,8 @@ TEST( Wfa2Damage, GA3PrimeTreatedAsMatch )
 {
     // Positions 3 and 4 (last two of a 5-base read): read=A, ref=G → G→A damage.
     Wfa2Settings s;
-    s.scope          = Wfa2Settings::Scope::Score;
-    s.damage_ga_start = 3;  // zone covers positions 3 and 4
+    s.scope              = Wfa2Settings::Scope::Score;
+    s.damage_ga_3p_reach = 2;  // last 2 bases of the read: positions 3 and 4
     Wfa2Aligner aligner{ s };
 
     auto const r = aligner.align_score( "ACGAA", "ACGGG" );
@@ -457,15 +483,43 @@ TEST( Wfa2Damage, GA3PrimeTreatedAsMatch )
 
 TEST( Wfa2Damage, GA3PrimeOutsideZonePenalised )
 {
-    // G→A at position 1, but ga_start=3 means only positions 3+ are covered.
+    // G→A at position 1, but ga_reach=2 means only the last 2 bases (3, 4) are covered.
     Wfa2Settings s;
-    s.scope           = Wfa2Settings::Scope::Score;
-    s.damage_ga_start = 3;
+    s.scope              = Wfa2Settings::Scope::Score;
+    s.damage_ga_3p_reach = 2;
     Wfa2Aligner aligner{ s };
 
     auto const r = aligner.align_score( "AAGGG", "AGGGG" );  // pos 1: A vs G, outside zone
     EXPECT_EQ( r.status, Wfa2Result::Status::Ok );
     EXPECT_EQ( r.score,  -4 );
+}
+
+// Regression test: Wfa2Aligner is constructed once per thread and reused across many reads of
+// different lengths (see Wfa2Aligner's own class docs). damage_ga_3p_reach tolerates G->A
+// substitutions in the last N bases of *each* read; it must be recomputed relative to each
+// read's own length at alignment time (not a fixed absolute index baked in at construction),
+// so that the same aligner instance gives correct "last N bases" behaviour regardless of how
+// much read lengths vary across the calls that reuse it. Previously (when this field was an
+// absolute index, damage_ga_start) a value tuned for a 10-base read's last 2 bases (positions
+// 8, 9) failed to reach back far enough on a shorter 5-base read's last 2 bases (positions 3,
+// 4) -- see wfa2.cpp run_align(), which now recomputes the threshold from each call's qlen.
+TEST( Wfa2Damage, GA3PrimeToleranceIsLengthInvariantAcrossReusedAligner )
+{
+    Wfa2Settings s;
+    s.scope              = Wfa2Settings::Scope::Score;
+    s.damage_ga_3p_reach = 2;  // last 2 bases of the read, regardless of the read's length
+    Wfa2Aligner aligner{ s };
+
+    // Sanity check: works as intended for the 10-base read it was tuned for.
+    auto const r10 = aligner.align_score( "AAAAAAAAAA", "AAAAAAAAAG" );  // pos 9: A vs G
+    EXPECT_EQ( r10.status, Wfa2Result::Status::Ok );
+    EXPECT_EQ( r10.score,  0 );
+
+    // Same aligner reused on a shorter 5-base read: position 4 is that read's actual last base,
+    // so it should also be tolerated under length-invariant "last 2 bases" semantics.
+    auto const r5 = aligner.align_score( "AAAAA", "AAAAG" );  // pos 4: A vs G, read's last base
+    EXPECT_EQ( r5.status, Wfa2Result::Status::Ok );
+    EXPECT_EQ( r5.score,  0 );
 }
 
 TEST( Wfa2Damage, NoDamageWithoutSettings )
@@ -488,8 +542,8 @@ TEST( Wfa2Damage, NoDamageWithoutSettings )
 TEST( Wfa2Damage, CT5PrimeCigarShowsMismatch )
 {
     Wfa2Settings s;
-    s.scope         = Wfa2Settings::Scope::Cigar;
-    s.damage_ct_end = 3;
+    s.scope              = Wfa2Settings::Scope::Cigar;
+    s.damage_ct_5p_reach = 3;
     Wfa2Aligner aligner{ s };
 
     auto const r = aligner.align_cigar( "TACGT", "CACGT" );
@@ -502,8 +556,8 @@ TEST( Wfa2Damage, CT5PrimeCigarShowsMismatch )
 TEST( Wfa2Damage, GA3PrimeCigarShowsMismatch )
 {
     Wfa2Settings s;
-    s.scope           = Wfa2Settings::Scope::Cigar;
-    s.damage_ga_start = 3;
+    s.scope              = Wfa2Settings::Scope::Cigar;
+    s.damage_ga_3p_reach = 2;  // last 2 bases of the read: positions 3 and 4
     Wfa2Aligner aligner{ s };
 
     auto const r = aligner.align_cigar( "ACGAA", "ACGGG" );
@@ -519,7 +573,7 @@ TEST( Wfa2Damage, CigarShowsMismatchWithCollapsedMCigar )
     // itself is ambiguous (all M), but edit_distance must still detect the substitution.
     Wfa2Settings s;
     s.scope              = Wfa2Settings::Scope::Cigar;
-    s.damage_ct_end      = 3;
+    s.damage_ct_5p_reach = 3;
     s.use_extended_cigar = false;
     Wfa2Aligner aligner{ s };
 
