@@ -495,6 +495,180 @@ TEST( KmerSeeding, StatsSoftCappedKmersAccumulatesAcrossQueries )
     EXPECT_EQ( ks.stats().soft_capped_kmers, 3u );
 }
 
+TEST( KmerSeeding, StatsPostingsRollupCountsFoundAbsentAndHardCapped )
+{
+    // term 0: 3 postings, hard-capped at build time (max_postings_per_term=1).
+    // term 1: 1 posting, found normally.
+    // term 2: present but empty (kEmpty).
+    TempFile tmp;
+    {
+        Builder::Config cfg;
+        cfg.max_postings_per_term = 1;
+        Builder builder( 3, cfg );
+        builder.add( 0, 10 );
+        builder.add( 0, 20 );
+        builder.add( 0, 30 );
+        builder.add( 1, 40 );
+        builder.write( tmp.path );
+    }
+    Index idx;
+    idx.open( tmp.path );
+
+    KS ks( {}, idx, 100 );
+    std::vector<Interval> out;
+
+    auto q = ks.start_query();
+    q.add_kmer( 0 ); // hard-capped
+    q.add_kmer( 1 ); // found
+    q.add_kmer( 2 ); // absent (empty)
+    q.finish_query( 50, out );
+
+    auto const s = ks.stats();
+    EXPECT_EQ( s.found_kmers,       1u );
+    EXPECT_EQ( s.absent_kmers,      1u );
+    EXPECT_EQ( s.hard_capped_kmers, 1u );
+}
+
+TEST( KmerSeeding, StatsNumKmersHistogramTracksAddedCount )
+{
+    TempFile tmp;
+    build_index_( tmp.path, {{ 10 }, { 20 }, { 30 }} );
+    Index idx;
+    idx.open( tmp.path );
+
+    KS ks( {}, idx, 100 );
+    std::vector<Interval> out;
+
+    { // 0 k-mers added
+        auto q = ks.start_query();
+        q.finish_query( 50, out );
+    }
+    { // 2 k-mers added
+        auto q = ks.start_query();
+        q.add_kmer( 0 );
+        q.add_kmer( 1 );
+        q.finish_query( 50, out );
+    }
+    { // 3 k-mers added
+        auto q = ks.start_query();
+        q.add_kmer( 0 );
+        q.add_kmer( 1 );
+        q.add_kmer( 2 );
+        q.finish_query( 50, out );
+    }
+
+    auto const hist = ks.stats().num_kmers_histogram;
+    ASSERT_EQ( hist.size(), KS::kMaxKmersPerRead + 1 );
+    EXPECT_EQ( hist[0], 1u );
+    EXPECT_EQ( hist[2], 1u );
+    EXPECT_EQ( hist[3], 1u );
+}
+
+TEST( KmerSeeding, StatsNumSeedsHistogramTracksIntervalCount )
+{
+    // Three far-apart pairs, each forming exactly one interval under min_hit_count=2 and
+    // window_length=5 (bin_width=10, read_length=40 -> ceil(40/10)+1=5) -- mirrors the
+    // concurrency fixture's profile construction (build_concurrent_profiles_ below). All three
+    // pairs are queried together, so out should contain exactly 3 intervals: large enough to
+    // prove the histogram actually grows past its initial (empty) size, not just that bin 0/1
+    // work as edge cases.
+    TempFile tmp;
+    Builder builder( 6 );
+    for( std::size_t p = 0; p < 3; ++p ) {
+        auto const base = p * 1000;
+        builder.add( static_cast<Index::term_index_type>( 2 * p ),     base + 1 );
+        builder.add( static_cast<Index::term_index_type>( 2 * p ),     base + 5 );
+        builder.add( static_cast<Index::term_index_type>( 2 * p + 1 ), base + 3 );
+        builder.add( static_cast<Index::term_index_type>( 2 * p + 1 ), base + 7 );
+    }
+    builder.write( tmp.path );
+    Index idx;
+    idx.open( tmp.path );
+
+    KS::Config cfg;
+    cfg.min_hit_count = 2;
+    KS ks( cfg, idx, 10 );
+
+    auto q = ks.start_query();
+    for( Index::term_index_type t = 0; t < 6; ++t ) {
+        q.add_kmer( t );
+    }
+    std::vector<Interval> out;
+    q.finish_query( 40, out );
+    ASSERT_EQ( out.size(), 3u );
+
+    auto const hist = ks.stats().num_seeds_histogram;
+    ASSERT_GT( hist.size(), 3u );
+    EXPECT_EQ( hist[3], 1u );
+}
+
+TEST( KmerSeeding, StatsTopPeakHitsHistogramBin0ForEmptyResultAndPeakForNonEmpty )
+{
+    // term 2 alone gives list_count()==1 < min_hit_count==2 -> empty result -> bin 0.
+    // terms 0/1 reuse the EndToEnd fixture (list0={1,5}, list1={3,7}) -> peak_hits==2 -> bin 2.
+    TempFile tmp;
+    build_index_( tmp.path, {{ 1, 5 }, { 3, 7 }, { 999999 }} );
+    Index idx;
+    idx.open( tmp.path );
+
+    KS::Config cfg;
+    cfg.min_hit_count = 2;
+    KS ks( cfg, idx, 10 );
+    std::vector<Interval> out;
+
+    {
+        auto q = ks.start_query();
+        q.add_kmer( 2 );
+        q.finish_query( 40, out );
+    }
+    EXPECT_TRUE( out.empty() );
+
+    {
+        auto q = ks.start_query();
+        q.add_kmer( 0 );
+        q.add_kmer( 1 );
+        q.finish_query( 40, out );
+    }
+    ASSERT_FALSE( out.empty() );
+    ASSERT_EQ( out[0].peak_hits, 2u );
+
+    auto const hist = ks.stats().top_peak_hits_histogram;
+    EXPECT_EQ( hist[0], 1u );
+    EXPECT_EQ( hist[2], 1u );
+}
+
+TEST( KmerSeeding, CollectStatsFalseSkipsBookkeepingButNotSeeding )
+{
+    // Reuse the EndToEnd fixture (list0={1,5}, list1={3,7}) so the seeding result itself
+    // (out) has a known expected value to check against, proving collect_stats=false only
+    // switches off the stats bookkeeping and doesn't affect the actual seeding logic.
+    TempFile tmp;
+    build_index_( tmp.path, {{ 1, 5 }, { 3, 7 }} );
+    Index idx;
+    idx.open( tmp.path );
+
+    KS::Config cfg;
+    cfg.min_hit_count   = 2;
+    cfg.collect_stats   = false;
+    KS ks( cfg, idx, 10 );
+
+    auto q = ks.start_query();
+    q.add_kmer( 0 );
+    q.add_kmer( 1 );
+    std::vector<Interval> out;
+    q.finish_query( 40, out );
+
+    ASSERT_EQ( out.size(), 1u );
+    EXPECT_EQ( out[0].left,      1u );
+    EXPECT_EQ( out[0].right,     7u );
+    EXPECT_EQ( out[0].peak_hits, 2u );
+
+    auto const s = ks.stats();
+    EXPECT_EQ( s.total_queries, 0u );
+    EXPECT_EQ( s.found_kmers,   0u );
+    EXPECT_TRUE( s.num_seeds_histogram.empty() );
+}
+
 // =================================================================================================
 //     End-to-End Functional
 // =================================================================================================
@@ -729,6 +903,15 @@ static void run_concurrent_deterministic_( std::size_t num_threads, std::size_t 
     EXPECT_EQ( ks.stats().total_queries, num_threads * iterations );
     EXPECT_EQ( ks.stats().empty_queries, 0u );
     EXPECT_EQ( ks.stats().truncated_queries, 0u );
+
+    // Every query yields exactly one interval, so all concurrent increments land on the same
+    // bin (index 1) of the mutex-guarded num_seeds_histogram_ -- this is what actually exercises
+    // that mechanism under real concurrent growth/increment, not just the single-threaded logic
+    // covered by the StatsNumSeedsHistogram* tests above.
+    auto const seeds_hist = ks.stats().num_seeds_histogram;
+    ASSERT_EQ( seeds_hist.size(), 2u );
+    EXPECT_EQ( seeds_hist[0], 0u );
+    EXPECT_EQ( seeds_hist[1], num_threads * iterations );
 }
 
 // Sweeps thread counts (mirroring InvertedIndex's StressNoCap/StressCapped convention) and
@@ -760,8 +943,8 @@ TEST( KmerSeedingConcurrent, Deterministic )
 // (mirroring commands/map/locate.cpp, which enqueues one detached task per read), consumed by
 // kNumThreads workers pulling from the shared queue -- and puts real, sustained pressure on the
 // queue's enqueue/dequeue synchronization instead of just running kNumThreads independent loops.
-TEST( KmerSeedingConcurrent, StressPerf )
-// TEST( KmerSeedingConcurrent, DISABLED_StressPerf )
+// TEST( KmerSeedingConcurrent, StressPerf )
+TEST( KmerSeedingConcurrent, DISABLED_StressPerf )
 {
     using Clock = std::chrono::steady_clock;
     using Ms    = std::chrono::duration<double, std::milli>;

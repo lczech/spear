@@ -36,12 +36,14 @@
 #include "spear/inverted_index/term_postings.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <mutex>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
@@ -137,6 +139,10 @@ public:
         /// Soft cap on posting-list length: k-mers occurring more times than this are skipped.
         /// 0 means no cap.
         std::size_t max_occurrences_per_kmer = 0;
+
+        /// Whether finish_query() accumulates stats() bookkeeping. Disable only to measure the
+        /// overhead of stats collection itself, or to shave it off on a performance-critical run.
+        bool collect_stats = true;
     };
 
     // -------------------------------------------------------------------------
@@ -146,8 +152,7 @@ public:
     /**
      * @brief Cumulative statistics across all queries run through this engine.
      *
-     * Plain value snapshot returned by stats(); see AtomicStats for the atomics
-     * this is derived from. Safe to copy, print, and pass around freely.
+     * Plain value snapshot returned by stats(). Safe to copy, print, and pass around freely.
      */
     struct Stats
     {
@@ -158,11 +163,39 @@ public:
         /// only the first kMaxKmersPerRead were seeded.
         std::uint64_t truncated_queries = 0;
 
+        /// Queries that returned no seed intervals (read did not map).
+        std::uint64_t empty_queries     = 0;
+
+        /// Cumulative k-mers whose posting list exceeded the index's build-time hard cap
+        /// (a property of the index itself, unlike soft_capped_kmers which is tunable per run).
+        std::uint64_t hard_capped_kmers = 0;
+
         /// Cumulative k-mers skipped due to max_occurrences_per_kmer across all queries.
         std::uint64_t soft_capped_kmers = 0;
 
-        /// Queries that returned no seed intervals (read did not map).
-        std::uint64_t empty_queries     = 0;
+        /// Cumulative k-mers whose posting list was found (present, decoded) across all queries.
+        std::uint64_t found_kmers       = 0;
+
+        /// Cumulative k-mers not present in the index at all (zero postings) across all queries.
+        std::uint64_t absent_kmers      = 0;
+
+        /// Count of reads by number of k-mers added to the query (bin i = reads with exactly
+        /// i k-mers added), for i in [0, kMaxKmersPerRead]. Always has kMaxKmersPerRead + 1
+        /// entries, since the bound is a compile-time constant.
+        std::vector<std::uint64_t> num_kmers_histogram;
+
+        /// Count of reads by the peak_hits of their single strongest seed interval (bin i =
+        /// reads whose best interval had peak_hits == i), for i in [1, kMaxKmersPerRead]. Bin 0
+        /// counts reads with no seed interval at all: a real interval always has peak_hits >= 1
+        /// (HitCollector::query() never returns one below min_hit_count), so bin 0 is otherwise
+        /// unreachable and is repurposed here as the "read did not map" bucket.
+        std::vector<std::uint64_t> top_peak_hits_histogram;
+
+        /// Count of reads by number of seed intervals returned (bin i = reads with exactly i
+        /// candidate intervals). Unbounded: a read can map to arbitrarily many intervals in
+        /// repetitive genome regions, so this grows as large as the largest count observed
+        /// across all queries so far.
+        std::vector<std::uint64_t> num_seeds_histogram;
     };
 
     // -------------------------------------------------------------------------
@@ -255,17 +288,59 @@ public:
             auto const min_hits      = engine_.derive_min_hits_( count_ );
             hit_collector_->query( *term_postings_, window_length, min_hits, out );
 
+            // Stats collection can be switched off (Config::collect_stats); seeding itself
+            // (out, filled above) is unaffected either way.
+            if( !engine_.config_.collect_stats ) {
+                return;
+            }
+
             // Accumulate stats
             engine_.stats_.total_queries.fetch_add( 1, std::memory_order_relaxed );
-            engine_.stats_.soft_capped_kmers.fetch_add(
-                static_cast<std::uint64_t>( term_postings_->stats().soft_capped ),
-                std::memory_order_relaxed
-            );
             if( truncated_ ) {
                 engine_.stats_.truncated_queries.fetch_add( 1, std::memory_order_relaxed );
             }
             if( out.empty() ) {
                 engine_.stats_.empty_queries.fetch_add( 1, std::memory_order_relaxed );
+            }
+            auto const& tp_stats = term_postings_->stats();
+            engine_.stats_.hard_capped_kmers.fetch_add(
+                static_cast<std::uint64_t>( tp_stats.hard_capped ), std::memory_order_relaxed
+            );
+            engine_.stats_.soft_capped_kmers.fetch_add(
+                static_cast<std::uint64_t>( tp_stats.soft_capped ), std::memory_order_relaxed
+            );
+            engine_.stats_.found_kmers.fetch_add(
+                static_cast<std::uint64_t>( tp_stats.found ), std::memory_order_relaxed
+            );
+            engine_.stats_.absent_kmers.fetch_add(
+                static_cast<std::uint64_t>( tp_stats.empty ), std::memory_order_relaxed
+            );
+
+            // Bounded histograms: count_ <= kMaxKmersPerRead is guaranteed by add_kmer()'s own
+            // limit, and peak_hits of any returned interval is a popcount over a kMaxKmersPerRead-
+            // bit set, so both indices are in range by construction; the asserts are a cheap
+            // safety net against that invariant ever breaking under future changes.
+            assert( count_ < engine_.stats_.num_kmers_histogram.size() );
+            engine_.stats_.num_kmers_histogram[count_].fetch_add( 1, std::memory_order_relaxed );
+
+            // peak_hits of the strongest (first, since out is sorted descending) interval; bin 0
+            // is reserved for "no seed interval found" (see Stats::top_peak_hits_histogram).
+            std::size_t const top_peak_hits = out.empty() ? 0 : out[0].peak_hits;
+            assert( top_peak_hits < engine_.stats_.top_peak_hits_histogram.size() );
+            engine_.stats_.top_peak_hits_histogram[top_peak_hits].fetch_add(
+                1, std::memory_order_relaxed
+            );
+
+            // Unbounded histogram of seed-interval counts: growth can't be done lock-free, so
+            // this is the one stat guarded by a mutex instead of an atomic. One lock per read,
+            // negligible next to the k-mer lookups and sliding-window merge just performed above.
+            {
+                std::lock_guard<std::mutex> lock( engine_.stats_.num_seeds_histogram_mutex );
+                auto& hist = engine_.stats_.num_seeds_histogram;
+                if( out.size() >= hist.size() ) {
+                    hist.resize( out.size() + 1, 0 );
+                }
+                ++hist[ out.size() ];
             }
         }
 
@@ -435,15 +510,36 @@ public:
     /**
      * @brief Snapshot of cumulative statistics across all finish_query() calls on this engine.
      *
-     * Safe to call from any thread; typically read after all queries have completed.
+     * Only call this once every finish_query() call that was started has also returned, on
+     * every thread that used this engine -- e.g. after joining/waiting on whatever thread pool
+     * drove the queries. Calling it while a query is still in flight elsewhere is not safe.
      */
-    Stats stats() const noexcept
+    Stats stats() const
     {
         Stats s;
         s.total_queries     = stats_.total_queries.load( std::memory_order_relaxed );
         s.truncated_queries = stats_.truncated_queries.load( std::memory_order_relaxed );
-        s.soft_capped_kmers = stats_.soft_capped_kmers.load( std::memory_order_relaxed );
         s.empty_queries     = stats_.empty_queries.load( std::memory_order_relaxed );
+        s.soft_capped_kmers = stats_.soft_capped_kmers.load( std::memory_order_relaxed );
+        s.found_kmers       = stats_.found_kmers.load( std::memory_order_relaxed );
+        s.absent_kmers      = stats_.absent_kmers.load( std::memory_order_relaxed );
+        s.hard_capped_kmers = stats_.hard_capped_kmers.load( std::memory_order_relaxed );
+
+        s.num_kmers_histogram.reserve( stats_.num_kmers_histogram.size() );
+        for( auto const& bin : stats_.num_kmers_histogram ) {
+            s.num_kmers_histogram.push_back( bin.load( std::memory_order_relaxed ) );
+        }
+
+        s.top_peak_hits_histogram.reserve( stats_.top_peak_hits_histogram.size() );
+        for( auto const& bin : stats_.top_peak_hits_histogram ) {
+            s.top_peak_hits_histogram.push_back( bin.load( std::memory_order_relaxed ) );
+        }
+
+        {
+            std::lock_guard<std::mutex> lock( stats_.num_seeds_histogram_mutex );
+            s.num_seeds_histogram = stats_.num_seeds_histogram;
+        }
+
         return s;
     }
 
@@ -487,19 +583,39 @@ private:
     spear::inverted_index::InvertedIndex<PositionT> const& index_;
     std::size_t bin_width_;
 
-    // Atomic counterpart of Stats, incremented from finish_query(); stats() loads these
-    // (relaxed) into a plain Stats snapshot for callers. Kept internal so callers never
-    // have to deal with atomics directly (can't copy/print/return an atomic by value).
-    struct AtomicStats
+    // Mutable state backing Stats, written from finish_query() and read (snapshotted) by
+    // stats(). Kept internal so callers never have to deal with atomics or the histogram lock
+    // directly (can't copy/print/return an atomic by value, and the plain scalars/histograms
+    // in Stats need somewhere thread-safe to live). Most fields here are lock-free atomics;
+    // num_seeds_histogram is the one exception (see its own comment below).
+    struct StatsStorage
     {
         std::atomic<std::uint64_t> total_queries     = 0;
         std::atomic<std::uint64_t> truncated_queries = 0;
-        std::atomic<std::uint64_t> soft_capped_kmers = 0;
         std::atomic<std::uint64_t> empty_queries     = 0;
+        std::atomic<std::uint64_t> hard_capped_kmers = 0;
+        std::atomic<std::uint64_t> soft_capped_kmers = 0;
+        std::atomic<std::uint64_t> found_kmers       = 0;
+        std::atomic<std::uint64_t> absent_kmers      = 0;
+
+        // Bounded histograms: index is always in range by construction (see finish_query()),
+        // so a plain fixed-size array with per-element atomic increments is enough -- no lock
+        // needed, unlike num_seeds_histogram below.
+        std::array<std::atomic<std::uint64_t>, kMaxKmersPerRead + 1> num_kmers_histogram{};
+        std::array<std::atomic<std::uint64_t>, kMaxKmersPerRead + 1> top_peak_hits_histogram{};
+
+        // Histogram of seed-interval counts (Stats::num_seeds_histogram). Unlike the bounded
+        // histograms above, the number of seed intervals for a read has no fixed upper bound,
+        // so this can't be a fixed-size array of atomics (std::atomic isn't movable, so a
+        // std::vector of them can't grow); growing a plain vector isn't lock-free either, so
+        // this is instead a plain vector guarded by its own mutex (see finish_query() and
+        // stats()), the one field here that isn't a lock-free atomic.
+        std::mutex num_seeds_histogram_mutex;
+        std::vector<std::uint64_t> num_seeds_histogram;
     };
 
-    // Mutable so Query (which holds KmerSeeding const&) can increment atomics in finish_query().
-    mutable AtomicStats stats_;
+    // Mutable so Query (which holds KmerSeeding const&) can update this in finish_query().
+    mutable StatsStorage stats_;
 };
 
 } // namespace spear::seeding
