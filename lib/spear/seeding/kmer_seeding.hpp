@@ -45,7 +45,9 @@
 #include <cstdio>
 #include <mutex>
 #include <span>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -166,18 +168,18 @@ public:
         /// Queries that returned no seed intervals (read did not map).
         std::uint64_t empty_queries     = 0;
 
+        /// Cumulative k-mers whose posting list was found (present, decoded) across all queries.
+        std::uint64_t found_kmers       = 0;
+
+        /// Cumulative k-mers not present in the index at all (zero postings) across all queries.
+        std::uint64_t absent_kmers      = 0;
+
         /// Cumulative k-mers whose posting list exceeded the index's build-time hard cap
         /// (a property of the index itself, unlike soft_capped_kmers which is tunable per run).
         std::uint64_t hard_capped_kmers = 0;
 
         /// Cumulative k-mers skipped due to max_occurrences_per_kmer across all queries.
         std::uint64_t soft_capped_kmers = 0;
-
-        /// Cumulative k-mers whose posting list was found (present, decoded) across all queries.
-        std::uint64_t found_kmers       = 0;
-
-        /// Cumulative k-mers not present in the index at all (zero postings) across all queries.
-        std::uint64_t absent_kmers      = 0;
 
         /// Count of reads by number of k-mers added to the query (bin i = reads with exactly
         /// i k-mers added), for i in [0, kMaxKmersPerRead]. Always has kMaxKmersPerRead + 1
@@ -196,6 +198,47 @@ public:
         /// repetitive genome regions, so this grows as large as the largest count observed
         /// across all queries so far.
         std::vector<std::uint64_t> num_seeds_histogram;
+
+        /**
+         * @brief Human-readable dump of every field of the stats.
+         *
+         * Scalar counters are always printed, including zeros. Histogram bins that are zero
+         * are skipped (a display compaction, not a hidden field: every histogram is still
+         * present, just without empty entries).
+         */
+        std::string to_string() const
+        {
+            std::ostringstream os;
+            os << "Total queries: " << total_queries << '\n';
+            os << "Truncated queries (more than " << KmerSeeding::kMaxKmersPerRead
+               << " k-mers): " << truncated_queries << '\n';
+            os << "Empty queries (no seed interval found): " << empty_queries << '\n';
+            os << "K-mers found in the index: " << found_kmers << '\n';
+            os << "K-mers not present in the index at all: " << absent_kmers << '\n';
+            os << "K-mers skipped due to hard cap: " << hard_capped_kmers << '\n';
+            os << "K-mers skipped due to soft cap: " << soft_capped_kmers << '\n';
+
+            auto const print_histogram = [&](
+                char const* label, std::vector<std::uint64_t> const& hist
+            ) {
+                os << label << '\n';
+                for( std::size_t i = 0; i < hist.size(); ++i ) {
+                    if( hist[i] == 0 ) {
+                        continue;
+                    }
+                    os << "  " << i << ": " << hist[i] << '\n';
+                }
+            };
+            print_histogram( "Histogram of k-mers per read:", num_kmers_histogram );
+            print_histogram( "Histogram of candidate intervals per read:", num_seeds_histogram );
+            print_histogram(
+                "Histogram of top seed interval strength (peak_hits) per read "
+                "(0 = read did not map):",
+                top_peak_hits_histogram
+            );
+
+            return os.str();
+        }
     };
 
     // -------------------------------------------------------------------------
@@ -593,10 +636,10 @@ private:
         std::atomic<std::uint64_t> total_queries     = 0;
         std::atomic<std::uint64_t> truncated_queries = 0;
         std::atomic<std::uint64_t> empty_queries     = 0;
-        std::atomic<std::uint64_t> hard_capped_kmers = 0;
-        std::atomic<std::uint64_t> soft_capped_kmers = 0;
         std::atomic<std::uint64_t> found_kmers       = 0;
         std::atomic<std::uint64_t> absent_kmers      = 0;
+        std::atomic<std::uint64_t> hard_capped_kmers = 0;
+        std::atomic<std::uint64_t> soft_capped_kmers = 0;
 
         // Bounded histograms: index is always in range by construction (see finish_query()),
         // so a plain fixed-size array with per-element atomic increments is enough -- no lock
