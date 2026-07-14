@@ -27,6 +27,7 @@
 #include "CLI/CLI.hpp"
 
 #include "spear/seeding/kmer_seeding.hpp"
+#include "spear/seeding/seed_filter.hpp"
 
 #include "tools/cli_option.hpp"
 
@@ -96,6 +97,18 @@ public:
     }
 
     // -------------------------------------------------------------------------
+    //     Seed filter factory
+    // -------------------------------------------------------------------------
+
+    /**
+     * @brief Build a SeedFilterConfig from the current option values.
+     *
+     * Use with spear::seeding::filter_seed_intervals() to select which candidate seed
+     * intervals from a KmerSeeding query are worth pursuing further (e.g. aligning).
+     */
+    spear::seeding::SeedFilterConfig make_seed_filter_config() const;
+
+    // -------------------------------------------------------------------------
     //     Option members
     // -------------------------------------------------------------------------
 
@@ -107,6 +120,18 @@ public:
 
     // Soft cap on per-k-mer occurrences; 0 = no cap.
     CliOption<std::size_t> max_occurrences_per_kmer = 0;
+
+    // Keep at most this many candidate seed intervals per read; 0 = no limit.
+    CliOption<std::size_t> max_seeds = 0;
+
+    // Absolute floor on a candidate's peak_hits; 0 = disabled.
+    CliOption<std::size_t> min_peak_hits = 0;
+
+    // Max allowed peak_hits gap below the read's best candidate; negative = disabled.
+    CliOption<int> peak_hits_window = -1;
+
+    // Min allowed peak_hits fraction of the read's best candidate; 0.0 = disabled.
+    CliOption<double> peak_hits_fraction = 0.0;
 
 };
 
