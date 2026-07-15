@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace spear::align {
@@ -177,14 +178,18 @@ public:
     /// Run score-only alignment; returns score and ref_end, but not ref_begin or CIGAR.
     /// query is the sequencing read (pattern, fully consumed);
     /// target is the reference genome window (text, free ends).
+    /// Neither is retained beyond the call, so both may be non-owning views (e.g. into a
+    /// larger buffer); only the bytes themselves must stay valid for the call's duration.
     /// Throws if constructed with Scope::Cigar.
-    Wfa2Result align_score( std::string const& query, std::string const& target );
+    Wfa2Result align_score( std::string_view query, std::string_view target );
 
     /// Run full alignment with backtrace; returns score, ref_begin, ref_end, and CIGAR.
     /// query is the sequencing read (pattern, fully consumed);
     /// target is the reference genome window (text, free ends).
+    /// Neither is retained beyond the call, so both may be non-owning views (e.g. into a
+    /// larger buffer); only the bytes themselves must stay valid for the call's duration.
     /// Throws if constructed with Scope::Score.
-    Wfa2Result align_cigar( std::string const& query, std::string const& target );
+    Wfa2Result align_cigar( std::string_view query, std::string_view target );
 
 private:
 

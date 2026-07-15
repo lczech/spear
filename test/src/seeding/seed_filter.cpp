@@ -273,3 +273,58 @@ TEST( SeedFilter, EverythingFilteredOutLeavesEmptyVector )
     filter_seed_intervals( intervals, cfg );
     EXPECT_TRUE( intervals.empty() );
 }
+
+// =================================================================================================
+//     merge_seed_intervals
+// =================================================================================================
+
+TEST( SeedMerge, BothEmptyStaysEmpty )
+{
+    std::vector<TestInterval> a;
+    std::vector<TestInterval> b;
+    auto const merged = merge_seed_intervals( a, b );
+    EXPECT_TRUE( merged.empty() );
+}
+
+TEST( SeedMerge, OneEmptyPassesOtherThrough )
+{
+    auto a = make_intervals( { 10, 5, 1 } );
+    std::vector<TestInterval> b;
+    auto const merged = merge_seed_intervals( a, b );
+    EXPECT_EQ( peak_hits_of( merged ), ( std::vector<std::size_t>{ 10, 5, 1 } ));
+
+    auto const merged2 = merge_seed_intervals( b, a );
+    EXPECT_EQ( peak_hits_of( merged2 ), ( std::vector<std::size_t>{ 10, 5, 1 } ));
+}
+
+TEST( SeedMerge, InterleavesWhilePreservingDescendingOrder )
+{
+    auto a = make_intervals( { 9, 6, 3 } );
+    auto b = make_intervals( { 10, 5, 1 } );
+    auto const merged = merge_seed_intervals( a, b );
+    EXPECT_EQ( peak_hits_of( merged ), ( std::vector<std::size_t>{ 10, 9, 6, 5, 3, 1 } ));
+}
+
+TEST( SeedMerge, ResultIsValidPrefixInputForFilterSeedIntervals )
+{
+    // Confirms the merge-then-filter pattern used by align.cpp: the merged list stays sorted
+    // descending, which filter_seed_intervals() requires (it relies on intervals.front() being
+    // the maximum, and on a prefix scan).
+    auto a = make_intervals( { 8, 4 } );
+    auto b = make_intervals( { 10, 6, 2 } );
+    auto merged = merge_seed_intervals( a, b );
+
+    SeedFilterConfig cfg;
+    cfg.max_seeds = 3;
+    filter_seed_intervals( merged, cfg );
+    EXPECT_EQ( peak_hits_of( merged ), ( std::vector<std::size_t>{ 10, 8, 6 } ));
+}
+
+TEST( SeedMerge, OutParamOverloadClearsPriorContents )
+{
+    auto a = make_intervals( { 5, 2 } );
+    auto b = make_intervals( { 4, 1 } );
+    std::vector<TestInterval> out = make_intervals( { 999 } ); // stale contents from a prior round
+    merge_seed_intervals( a, b, out );
+    EXPECT_EQ( peak_hits_of( out ), ( std::vector<std::size_t>{ 5, 4, 2, 1 } ));
+}

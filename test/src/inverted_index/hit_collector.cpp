@@ -428,6 +428,38 @@ TEST( HitCollector, OutParamOverloadReusesVector )
     EXPECT_GE( out.capacity(), 1u ); // capacity preserved (not shrunk)
 }
 
+// A type derived from HitInterval with an extra field, standing in for callers (like
+// KmerSeeding::SeedInterval) that need extra per-interval payload beyond what HitCollector
+// itself knows about.
+struct DerivedInterval : public HC::HitInterval
+{
+    int payload = -1;
+};
+
+// query<IntervalT>() must work generically for a type derived from HitInterval, constructing
+// left/right/peak_hits correctly and leaving the derived field at its default.
+TEST( HitCollector, GenericQuerySupportsDerivedIntervalType )
+{
+    TP tp( 2 );
+    tp.add( std::vector<std::uint64_t>{ 1, 5 } );
+    tp.add( std::vector<std::uint64_t>{ 3, 7 } );
+    HC hc;
+
+    std::vector<DerivedInterval> out;
+    hc.query( tp, 5, 2, out );
+    ASSERT_EQ( out.size(), 1u );
+    EXPECT_EQ( out[0].left,  1u );
+    EXPECT_EQ( out[0].right, 7u );
+    EXPECT_EQ( out[0].payload, -1 ); // untouched by HitCollector, still at its default
+
+    // The by-value overload cannot deduce IntervalT (it only appears in the return type),
+    // so it must be given explicitly here.
+    auto const out2 = hc.query<DerivedInterval>( tp, 5, 2 );
+    ASSERT_EQ( out2.size(), 1u );
+    EXPECT_EQ( out2[0].left,  1u );
+    EXPECT_EQ( out2[0].payload, -1 );
+}
+
 // =================================================================================================
 //     Performance tests
 // =================================================================================================

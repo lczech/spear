@@ -32,7 +32,9 @@
  */
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
+#include <iterator>
 #include <vector>
 
 namespace spear::seeding {
@@ -108,6 +110,60 @@ void filter_seed_intervals( std::vector<SeedIntervalT>& intervals, SeedFilterCon
     }
 
     intervals.resize( cutoff );
+}
+
+// =================================================================================================
+//     merge_seed_intervals
+// =================================================================================================
+
+/**
+ * @brief Merge two seed interval lists, each already sorted by peak_hits descending (e.g., one
+ * per read orientation, from two separate KmerSeeding queries), into @p out, a single combined
+ * list still sorted by peak_hits descending.
+ *
+ * Intended to run before filter_seed_intervals(), so that a single filtering pass applies its
+ * thresholds (max_seeds, peak_hits_window, peak_hits_fraction, ...) globally across both inputs,
+ * rather than independently per input.
+ *
+ * @p out is cleared first; it may alias neither @p a nor @p b.
+ */
+template<typename SeedIntervalT>
+void merge_seed_intervals(
+    std::vector<SeedIntervalT> const& a,
+    std::vector<SeedIntervalT> const& b,
+    std::vector<SeedIntervalT>&       out
+) {
+    auto const by_peak_hits_desc = []( SeedIntervalT const& x, SeedIntervalT const& y ) {
+        return x.peak_hits > y.peak_hits;
+    };
+    assert(
+        std::is_sorted( a.begin(), a.end(), by_peak_hits_desc )
+        && "merge_seed_intervals: 'a' must be sorted by peak_hits descending"
+    );
+    assert(
+        std::is_sorted( b.begin(), b.end(), by_peak_hits_desc )
+        && "merge_seed_intervals: 'b' must be sorted by peak_hits descending"
+    );
+
+    out.clear();
+    out.reserve( a.size() + b.size() );
+    std::merge( a.begin(), a.end(), b.begin(), b.end(), std::back_inserter( out ), by_peak_hits_desc );
+}
+
+/**
+ * @brief Convenience overload returning results by value.
+ *
+ * Prefer the out-parameter overload with a reused buffer to avoid per-call allocation on the
+ * hot path.
+ */
+template<typename SeedIntervalT>
+std::vector<SeedIntervalT> merge_seed_intervals(
+    std::vector<SeedIntervalT> const& a,
+    std::vector<SeedIntervalT> const& b
+) {
+    std::vector<SeedIntervalT> out;
+    merge_seed_intervals( a, b, out );
+    return out;
 }
 
 } // namespace spear::seeding

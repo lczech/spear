@@ -110,9 +110,22 @@ public:
     //     Types
     // -------------------------------------------------------------------------
 
-    // Result interval type from one seeding query. Fields are in genome-bin coordinates;
-    // translate to reference-sequence base coordinates at the call site as needed.
-    using SeedInterval = typename spear::inverted_index::HitCollector<PositionT, kRingCap>::HitInterval;
+    /**
+     * @brief Result interval type from one seeding query. Fields are in genome-bin coordinates;
+     * translate to reference-sequence base coordinates at the call site as needed.
+     *
+     * Adds a strand field on top of the generic HitCollector::HitInterval: KmerSeeding is the
+     * genomics-aware layer wrapping the strand-agnostic inverted_index machinery, so this is
+     * where that concept belongs. KmerSeeding itself never sets strand -- it is populated by the
+     * caller (e.g., the aligner), which is the only place that knows which orientation of a read a
+     * given query's results came from.
+     */
+    struct SeedInterval
+        : public spear::inverted_index::HitCollector<PositionT, kRingCap>::HitInterval
+    {
+        /// 0 = unset; +1 = forward strand; -1 = reverse complement.
+        int strand = 0;
+    };
 
     // Encoded k-mer index type, matching InvertedIndex::term_index_type.
     using kmer_index_type = typename spear::inverted_index::InvertedIndex<PositionT>::term_index_type;

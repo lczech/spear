@@ -132,11 +132,14 @@ struct Wfa2Aligner::Impl
     Impl( Impl const& ) = delete;
     Impl& operator=( Impl const& ) = delete;
 
-    inline int run_align( std::string const& query, std::string const& target )
+    inline int run_align( std::string_view query, std::string_view target )
     {
         // Set free-end alignment bounds and call the appropriate WFA2 functions.
         // With damage at the end, we use the lambda variant to pass in the match function.
         // Otherwise, we call the slightly faster standard align function.
+        // Note: WFA2 is purely length-based (qlen/tlen are passed explicitly and bound every
+        // access), never relying on NUL-termination, so non-owning, non-NUL-terminated views
+        // are safe to pass via .data() here.
         int const qlen = static_cast<int>( query.size()  );
         int const tlen = static_cast<int>( target.size() );
         wavefront_aligner_set_alignment_free_ends( wfa, 0, 0, tlen, tlen );
@@ -144,13 +147,13 @@ struct Wfa2Aligner::Impl
             // damage_ga_3p_reach is a length-invariant base count (like damage_ct_5p_reach), so the
             // absolute threshold it maps to must be recomputed per read from that read's own qlen.
             DamageArgs args{
-                query.c_str(), target.c_str(),
+                query.data(), target.data(),
                 settings.damage_ct_5p_reach,
                 qlen - settings.damage_ga_3p_reach
             };
             return wavefront_align_lambda( wfa, damage_match_fn, &args, qlen, tlen );
         }
-        return wavefront_align( wfa, query.c_str(), qlen, target.c_str(), tlen );
+        return wavefront_align( wfa, query.data(), qlen, target.data(), tlen );
     }
 };
 
@@ -183,7 +186,7 @@ Wfa2Aligner& Wfa2Aligner::operator=( Wfa2Aligner&& ) noexcept = default;
 
 // -------------------------------------------------------------------------
 
-Wfa2Result Wfa2Aligner::align_score( std::string const& query, std::string const& target )
+Wfa2Result Wfa2Aligner::align_score( std::string_view query, std::string_view target )
 {
     // Sanity check
     if( impl_->settings.scope != Wfa2Settings::Scope::Score ) {
@@ -215,7 +218,7 @@ Wfa2Result Wfa2Aligner::align_score( std::string const& query, std::string const
     };
 }
 
-Wfa2Result Wfa2Aligner::align_cigar( std::string const& query, std::string const& target )
+Wfa2Result Wfa2Aligner::align_cigar( std::string_view query, std::string_view target )
 {
     // Sanity check
     if( impl_->settings.scope != Wfa2Settings::Scope::Cigar ) {

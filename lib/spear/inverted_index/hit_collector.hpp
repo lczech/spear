@@ -118,6 +118,12 @@ public:
      * @brief Find all maximal hit intervals; results are appended to @p hit_intervals
      * (cleared first), and sorted by peak_hits descending, then left ascending.
      *
+     * @tparam IntervalT      Output interval type; must be constructible with
+     *                        `PositionT left`, `PositionT right`, `std::size_t peak_hits.
+     *                        Defaults to HitInterval; callers that need extra per-interval
+     *                        payload (e.g. a genomics-specific "strand" field) can pass a type
+     *                        that inherits from HitInterval and adds it -- this class stays
+     *                        agnostic of any such extension.
      * @param term_postings   Populated TermPostings collection.
      * @param window_length   Window length: a window [x, x+window_length] must cover values
      *                        from >= min_hit_count lists.
@@ -128,11 +134,12 @@ public:
      * Returns immediately with an empty @p hit_intervals if min_hit_count > list_count().
      * Throws std::invalid_argument if min_hit_count == 0.
      */
+    template<typename IntervalT = HitInterval>
     void query(
         TermPostings<PositionT> const& term_postings,
         PositionT                      window_length,
         std::size_t                    min_hit_count,
-        std::vector<HitInterval>&      hit_intervals
+        std::vector<IntervalT>&        hit_intervals
     ) {
         hit_intervals.clear();
 
@@ -189,6 +196,20 @@ public:
         PositionT   region_end   = {};
         std::size_t peak_count   = 0;
 
+        // Assignment-based construction, rather than aggregate-init with a brace-enclosed
+        // list (IntervalT{left, right, peak_hits}): works identically whether IntervalT is
+        // HitInterval itself or a type derived from it (e.g. with an extra field), without
+        // relying on brace elision into the base-class subobject in the latter case.
+        auto const make_interval_ = [](
+            PositionT left, PositionT right, std::size_t peak_hits
+        ) {
+            IntervalT iv{};
+            iv.left      = left;
+            iv.right     = right;
+            iv.peak_hits = peak_hits;
+            return iv;
+        };
+
         // Streaming k-way merge
         while( !tree.empty() ) {
 
@@ -237,20 +258,20 @@ public:
                 }
             } else if( in_valid ) {
                 in_valid = false;
-                hit_intervals.push_back({ region_start, region_end, peak_count });
+                hit_intervals.push_back( make_interval_( region_start, region_end, peak_count ));
             }
         }
 
         // Flush any open valid region at end of stream
         if( in_valid ) {
-            hit_intervals.push_back({ region_start, region_end, peak_count });
+            hit_intervals.push_back( make_interval_( region_start, region_end, peak_count ));
         }
 
         // Sort by peak_count descending: strongest regions first
         std::sort(
             hit_intervals.begin(),
             hit_intervals.end(),
-            []( HitInterval const& a, HitInterval const& b ) {
+            []( IntervalT const& a, IntervalT const& b ) {
                 return a.peak_hits > b.peak_hits;
             }
         );
@@ -259,14 +280,17 @@ public:
     /**
      * @brief Find all maximal hit intervals; returns results by value.
      *
-     * Prefer the out-parameter overload to reuse the result vector across calls.
+     * Prefer the out-parameter overload to reuse the result vector across calls. IntervalT
+     * cannot be deduced here (it only appears in the return type), so callers that want anything
+     * other than the default HitInterval must specify it explicitly, e.g. query<SeedInterval>(...).
      */
-    std::vector<HitInterval> query(
+    template<typename IntervalT = HitInterval>
+    std::vector<IntervalT> query(
         TermPostings<PositionT> const& term_postings,
         PositionT                      window_length,
         std::size_t                    min_hit_count
     ) {
-        std::vector<HitInterval> hit_intervals;
+        std::vector<IntervalT> hit_intervals;
         query( term_postings, window_length, min_hit_count, hit_intervals );
         return hit_intervals;
     }

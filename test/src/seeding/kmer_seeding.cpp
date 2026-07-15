@@ -710,7 +710,7 @@ TEST( KmerSeeding, FinishQueryOutParamClearsPriorContents )
     KS ks( cfg, idx, 10 );
 
     std::vector<Interval> out;
-    out.push_back( Interval{ 999, 999, 999 } ); // stale contents from a prior round
+    out.push_back( Interval{ { 999, 999, 999 } } ); // stale contents from a prior round
 
     auto q = ks.start_query();
     q.add_kmer( 0 );
@@ -761,6 +761,34 @@ TEST( KmerSeeding, RunQueryTruncatesBeyondMaxKmersPerRead )
     ks.run_query( kmers, 500, out );
 
     EXPECT_EQ( ks.stats().truncated_queries, 1u );
+}
+
+// SeedInterval::strand is KmerSeeding-owned payload that HitCollector/finish_query() never
+// touches; it must default to 0 (unset) and stay untouched unless the caller sets it.
+TEST( KmerSeeding, SeedIntervalStrandDefaultsToZeroAndIsCallerOwned )
+{
+    TempFile tmp;
+    build_index_( tmp.path, {{ 1, 5 }, { 3, 7 }} );
+    Index idx;
+    idx.open( tmp.path );
+
+    KS::Config cfg;
+    cfg.min_hit_count = 2;
+    KS ks( cfg, idx, 10 );
+
+    std::vector<KS::kmer_index_type> const kmers{ 0, 1 };
+    auto out = ks.run_query( kmers, 40 );
+
+    ASSERT_EQ( out.size(), 1u );
+    EXPECT_EQ( out[0].strand, 0 );
+
+    // Caller can freely set it; a subsequent query into the same reused vector overwrites the
+    // interval contents but is expected to leave strand at its own default again (finish_query()
+    // never reads or preserves it across calls).
+    out[0].strand = -1;
+    ks.run_query( kmers, 40, out );
+    ASSERT_EQ( out.size(), 1u );
+    EXPECT_EQ( out[0].strand, 0 );
 }
 
 // =================================================================================================
