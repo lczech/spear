@@ -171,6 +171,11 @@ void run_map_index_impl( MapIndexOptions const& options )
     ;
 
     // Set up the inverted index builder.
+    LOG_MSG << "Building index with k=" << static_cast<unsigned>( k )
+            << ", canonical=" << ( canonical ? "true" : "false" )
+            << ", genome bin width=" << w
+            << ", number of distinct terms=" << num_term_indices
+    ;
     using Builder = spear::inverted_index::InvertedIndexBuilder<PositionT>;
     Builder builder( num_term_indices, options.builder.make_builder_config<Builder>() );
 
@@ -191,10 +196,8 @@ void run_map_index_impl( MapIndexOptions const& options )
     //     Main loop
     // -------------------------------------------------------------------
 
-    LOG_MSG2
-        << "Memory usage before processing sequences: "
-        << text::to_string_byte_format( core::info_process_current_memory_usage() )
-    ;
+    // Mem usage before processing sequences.
+    global_options.report_memory_usage();
 
     // Sequentially iterate over all input fasta files and their sequences, dispatching the k-mer
     // extraction and index building for each sequence to the thread pool. We keep track of the
@@ -254,16 +257,12 @@ void run_map_index_impl( MapIndexOptions const& options )
         }
     }
     thread_pool->wait_for_all_pending_tasks();
-
-    LOG_MSG2
-        << "Memory usage after processing sequences: "
-        << text::to_string_byte_format( core::info_process_current_memory_usage() )
-    ;
     LOG_MSG
         << "Processed " << fasta_paths.size() << " file(s), "
         << sequence_count << " sequences, total length "
         << total_length << " bases."
     ;
+    global_options.report_memory_usage();
 
     // -------------------------------------------------------------------
     //     Write output

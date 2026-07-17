@@ -27,6 +27,7 @@
 #include "CLI/CLI.hpp"
 
 #include "commands/map/index.hpp"
+#include "commands/map/align.hpp"
 
 #include "options/global.hpp"
 #include "tools/cli_setup.hpp"
@@ -46,6 +47,7 @@ inline void setup_map( CLI::App& app )
 
     // Add module subcommands.
     setup_map_index( *sub );
+    setup_map_align( *sub );
 
     // Add the global options to each of the above subcommands.
     global_options.add_to_module( *sub );

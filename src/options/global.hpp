@@ -102,6 +102,17 @@ public:
     }
 
     // -------------------------------------------------------------------------
+    //     Other Helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * @brief Report the current memory usage of the process to the log, in a human-readable format.
+     *
+     * Only prints in verbose mode, using LOG_MSG2.
+     */
+    void report_memory_usage();
+
+    // -------------------------------------------------------------------------
     //     Option Members
     // -------------------------------------------------------------------------
 

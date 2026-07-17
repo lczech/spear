@@ -26,6 +26,7 @@
 #include "tools/version.hpp"
 
 #include "genesis/util/core/info.hpp"
+#include "genesis/util/text/string.hpp"
 
 #include <thread>
 
@@ -161,6 +162,20 @@ std::string GlobalOptions::command_line() const
     }
     return ret;
 }
+
+void GlobalOptions::report_memory_usage()
+{
+    if( !verbose.value ) {
+        return;
+    }
+
+    using namespace genesis::util::core;
+    using namespace genesis::util::text;
+    LOG_MSG2 << "Memory use process: " << to_string_byte_format( info_process_current_memory_usage() );
+    LOG_MSG2 << "Memory use system:  " << to_string_byte_format( info_system_current_memory_usage() );
+    LOG_MSG2 << "Memory available:   " << to_string_byte_format( info_system_current_memory_available() );
+}
+
 
 // =================================================================================================
 //      Global Instance
