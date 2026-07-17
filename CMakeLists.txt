@@ -199,9 +199,6 @@ include( IncludeWFA2 )
 # set( CMAKE_CXX_FLAGS        "${CMAKE_CXX_FLAGS}        ${GENESIS_CXX_FLAGS}" )
 # set( CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${GENESIS_EXE_LINKER_FLAGS}" )
 
-# Add CLI11 as dependency. It's header-only, so this is easy.
-include_directories( SYSTEM "libs/CLI11/include" )
-
 # ------------------------------------------------------------------------------
 #   Sources
 # ------------------------------------------------------------------------------

@@ -90,7 +90,7 @@ file(GENERATE OUTPUT "${TURBOPFOR_WRAPPER_DIR}/turbopfor/ic.h"
 )
 
 target_include_directories(turbopfor
-    PUBLIC
+    SYSTEM PUBLIC
     "${TURBOPFOR_SOURCE}/include"
     "${TURBOPFOR_WRAPPER_DIR}"
 )

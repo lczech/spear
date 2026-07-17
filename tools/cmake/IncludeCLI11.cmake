@@ -43,12 +43,24 @@ else()
             GIT_REPOSITORY "https://github.com/CLIUtils/CLI11.git"
             GIT_TAG        "${CLI11_GIT_TAG}"
         )
-        FetchContent_MakeAvailable(CLI11)
-        set(CLI11_SOURCE "${CLI11_SOURCE_DIR}")
+        # Use Populate (not MakeAvailable) to download without processing CLI11's own
+        # CMakeLists.txt, so this branch stays symmetric with the submodule branch above: both
+        # just grab a source directory, and both fall through to the fabricated INTERFACE
+        # target below, rather than diverging into CLI11's own exported target here.
+        # CMP0169 deprecated direct FetchContent_Populate in CMake 3.30; suppress the warning.
+        if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.30")
+            cmake_policy(SET CMP0169 OLD)
+        endif()
+        FetchContent_GetProperties(CLI11)
+        if(NOT cli11_POPULATED)
+            FetchContent_Populate(CLI11)
+        endif()
+        set(CLI11_SOURCE "${cli11_SOURCE_DIR}")
     endif()
 
-    # Header only, so we just need to include the dir.
-    include_directories("${CLI11_SOURCE}/include")
+    # Header only, so we just need to include the dir. Marked SYSTEM so that CLI11's own
+    # warnings (e.g. deprecated stdlib usage on some platforms) don't get attributed to us.
+    include_directories(SYSTEM "${CLI11_SOURCE}/include")
     # Include as: #include "CLI/CLI.hpp"
 
     # Now check targets exported by fetched version
@@ -64,7 +76,7 @@ else()
         message(STATUS "No exported target found; creating INTERFACE CLI11")
         add_library(CLI11 INTERFACE)
         target_include_directories(
-            CLI11 INTERFACE
+            CLI11 SYSTEM INTERFACE
             $<BUILD_INTERFACE:${CLI11_SOURCE}/include>
             # $<INSTALL_INTERFACE:include>
         )
