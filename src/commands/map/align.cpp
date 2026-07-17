@@ -413,8 +413,9 @@ void run_map_align_impl(
                     auto const ref_seq = reference.find_by_global_position( base_start );
                     auto const seq_start = reference.global_offset_of( ref_seq.index );
                     auto const local_start = ref_seq.local_offset;
-                    auto const local_end =
-                        std::min( base_end, seq_start + ref_seq.sequence->length - 1 ) - seq_start;
+                    auto const local_end = std::min(
+                        static_cast<std::size_t>( base_end ), seq_start + ref_seq.sequence->length - 1
+                    ) - seq_start;
 
                     // Padded alignment window: the seed interval's own bounds only reflect where
                     // matching k-mers were *found* in the reference, not where in the read they
