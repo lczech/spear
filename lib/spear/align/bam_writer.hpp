@@ -26,7 +26,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -67,8 +66,16 @@ struct BamHeader
     /// Reference sequence names and lengths for @SQ header lines.
     std::vector<std::pair<std::string, int64_t>> references;
 
-    /// Optional read group written as a @RG header line.
-    std::optional<ReadGroup> read_group;
+    /// Read groups written as @RG header lines, one per entry (e.g. one per input file, each
+    /// with its own id). Mutually exclusive with @p raw_read_groups: BamWriter throws if both
+    /// are non-empty.
+    std::vector<ReadGroup> read_groups;
+
+    /// Alternative to @p read_groups: complete, pre-formatted "@RG\t..." lines (one entry per
+    /// line, as accepted by htslib's sam_hdr_add_lines()), for callers that already have a full
+    /// read-group specification in hand -- e.g. mirroring bwa's/minimap2's `-R` -- rather than
+    /// wanting it built field-by-field. Mutually exclusive with @p read_groups.
+    std::vector<std::string> raw_read_groups;
 
     /**
      * @brief Default-construct an empty header; populate @p references manually

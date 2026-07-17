@@ -166,7 +166,8 @@ TEST( BamHeaderTest, DefaultConstruct )
 {
     BamHeader hdr;
     EXPECT_TRUE( hdr.references.empty() );
-    EXPECT_FALSE( hdr.read_group.has_value() );
+    EXPECT_TRUE( hdr.read_groups.empty() );
+    EXPECT_TRUE( hdr.raw_read_groups.empty() );
 }
 
 TEST( BamHeaderTest, FromSequenceSet )
@@ -192,12 +193,12 @@ TEST( BamHeaderTest, EmptySequenceSet )
 TEST( BamHeaderTest, ReadGroupFields )
 {
     BamHeader hdr;
-    hdr.read_group = BamHeader::ReadGroup{ "RG1", "Sample1", "Lib1", "ILLUMINA" };
-    ASSERT_TRUE( hdr.read_group.has_value() );
-    EXPECT_EQ( hdr.read_group->id,       "RG1" );
-    EXPECT_EQ( hdr.read_group->sample,   "Sample1" );
-    EXPECT_EQ( hdr.read_group->library,  "Lib1" );
-    EXPECT_EQ( hdr.read_group->platform, "ILLUMINA" );
+    hdr.read_groups.push_back( BamHeader::ReadGroup{ "RG1", "Sample1", "Lib1", "ILLUMINA" } );
+    ASSERT_EQ( hdr.read_groups.size(), 1u );
+    EXPECT_EQ( hdr.read_groups[0].id,       "RG1" );
+    EXPECT_EQ( hdr.read_groups[0].sample,   "Sample1" );
+    EXPECT_EQ( hdr.read_groups[0].library,  "Lib1" );
+    EXPECT_EQ( hdr.read_groups[0].platform, "ILLUMINA" );
 }
 
 TEST( BamHeaderTest, ReadGroupDefaultPlatform )
@@ -280,7 +281,7 @@ TEST( BamWriterHeader, RgLinePresent )
     TempFile tmp;
     {
         BamHeader hdr = make_header({{"chr1", 100}});
-        hdr.read_group = BamHeader::ReadGroup{ "RG1", "Sample1", "", "ILLUMINA" };
+        hdr.read_groups.push_back( BamHeader::ReadGroup{ "RG1", "Sample1", "", "ILLUMINA" } );
         BamWriter w( tmp.path, std::move(hdr), sam_settings() );
     }
     auto lines = read_header_lines( tmp.path );
@@ -295,7 +296,7 @@ TEST( BamWriterHeader, RgLineWithLibrary )
     TempFile tmp;
     {
         BamHeader hdr = make_header({{"chr1", 100}});
-        hdr.read_group = BamHeader::ReadGroup{ "RG1", "Sample1", "Lib1", "ILLUMINA" };
+        hdr.read_groups.push_back( BamHeader::ReadGroup{ "RG1", "Sample1", "Lib1", "ILLUMINA" } );
         BamWriter w( tmp.path, std::move(hdr), sam_settings() );
     }
     auto lines = read_header_lines( tmp.path );
@@ -311,6 +312,45 @@ TEST( BamWriterHeader, RgLineAbsent )
     }
     auto lines = read_header_lines( tmp.path );
     EXPECT_FALSE( header_has( lines, "@RG" ));
+}
+
+TEST( BamWriterHeader, MultipleReadGroupsProduceMultipleRgLines )
+{
+    TempFile tmp;
+    {
+        BamHeader hdr = make_header({{"chr1", 100}});
+        hdr.read_groups.push_back( BamHeader::ReadGroup{ "fileA", "S1", "", "ILLUMINA" } );
+        hdr.read_groups.push_back( BamHeader::ReadGroup{ "fileB", "S1", "", "ILLUMINA" } );
+        BamWriter w( tmp.path, std::move(hdr), sam_settings() );
+    }
+    auto lines = read_header_lines( tmp.path );
+    EXPECT_TRUE( header_has( lines, "ID:fileA" ));
+    EXPECT_TRUE( header_has( lines, "ID:fileB" ));
+}
+
+TEST( BamWriterHeader, RawReadGroupLineIsPassedThrough )
+{
+    TempFile tmp;
+    {
+        BamHeader hdr = make_header({{"chr1", 100}});
+        hdr.raw_read_groups.push_back( "@RG\tID:raw1\tSM:rawsample\tPL:PACBIO" );
+        BamWriter w( tmp.path, std::move(hdr), sam_settings() );
+    }
+    auto lines = read_header_lines( tmp.path );
+    EXPECT_TRUE( header_has( lines, "ID:raw1" ));
+    EXPECT_TRUE( header_has( lines, "SM:rawsample" ));
+    EXPECT_TRUE( header_has( lines, "PL:PACBIO" ));
+}
+
+TEST( BamWriterConstruct, BothReadGroupsAndRawReadGroupsThrows )
+{
+    TempFile tmp;
+    BamHeader hdr = make_header({{"chr1", 100}});
+    hdr.read_groups.push_back( BamHeader::ReadGroup{ "RG1", "S1", "", "ILLUMINA" } );
+    hdr.raw_read_groups.push_back( "@RG\tID:raw1\tSM:rawsample" );
+    EXPECT_THROW(
+        BamWriter( tmp.path, std::move(hdr), sam_settings() ), std::runtime_error
+    );
 }
 
 // =================================================================================================
@@ -970,7 +1010,7 @@ TEST( RecordFields, RgTagPresentWhenSet )
     TempFile tmp;
     {
         BamHeader hdr = make_header({{"chr1", 100}});
-        hdr.read_group = BamHeader::ReadGroup{ "RG1", "S1", "", "ILLUMINA" };
+        hdr.read_groups.push_back( BamHeader::ReadGroup{ "RG1", "S1", "", "ILLUMINA" } );
         BamWriter w( tmp.path, std::move(hdr), sam_settings() );
         ReadRecord rr = make_record("r1", "ACGT");
         rr.tag_rg = "RG1";

@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <genesis/sequence/sequence.hpp>
@@ -164,7 +165,7 @@ struct AlignmentHit
 /**
  * @brief A sequencing read together with all of its alignment hits.
  *
- * Owns all data so it can be moved safely across threads.
+ * Owns all data so it can be moved safely across threads, with one exception: see @p tag_rg.
  *
  * @p hits[0] is treated as the primary alignment by output writers; the caller is responsible
  * for ordering hits with the preferred primary first. Output format and secondary-hit handling
@@ -175,8 +176,11 @@ struct ReadRecord
     /// Read name, nucleotide sequence, and optional Phred quality scores (empty = unavailable).
     genesis::sequence::Sequence read;
 
-    /// RG aux tag: read group ID; should match BamHeader::read_group::id when set.
-    std::optional<std::string> tag_rg;
+    /// RG aux tag: read group ID; should match the id of one of BamHeader::read_groups.
+    /// Non-owning: the caller is responsible for ensuring the referenced string outlives this
+    /// ReadRecord, e.g. by pointing into storage kept alive for the whole run (not a per-read
+    /// local), since ReadRecord may be buffered and written out well after it was constructed.
+    std::optional<std::string_view> tag_rg;
 
     /// All alignment hits for this read; [0] is primary.
     std::vector<AlignmentHit> hits;

@@ -27,6 +27,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 // htslib has its own extern "C" guards; no extra wrapping needed here.
 #include <htslib/sam.h>
@@ -217,8 +218,12 @@ struct BamWriter::Impl
                 throw std::runtime_error( "BamWriter: failed to add @SQ line for: " + name );
             }
         }
-        if( header_.read_group ) {
-            BamHeader::ReadGroup const& rg = *header_.read_group;
+        if( !header_.read_groups.empty() && !header_.raw_read_groups.empty() ) {
+            throw std::runtime_error(
+                "BamWriter: BamHeader has both read_groups and raw_read_groups set; use only one"
+            );
+        }
+        for( auto const& rg : header_.read_groups ) {
             int rg_ret;
             if( rg.library.empty() ) {
                 rg_ret = sam_hdr_add_line( hdr, "RG",
@@ -233,6 +238,11 @@ struct BamWriter::Impl
             }
             if( rg_ret < 0 ) {
                 throw std::runtime_error( "BamWriter: failed to add @RG line for ID: " + rg.id );
+            }
+        }
+        for( auto const& raw : header_.raw_read_groups ) {
+            if( sam_hdr_add_lines( hdr, raw.c_str(), raw.size() ) < 0 ) {
+                throw std::runtime_error( "BamWriter: failed to add raw @RG line: " + raw );
             }
         }
         if( sam_hdr_add_line( hdr, "PG", "ID", "spear", "PN", "spear", NULL ) < 0 ) {
@@ -297,7 +307,11 @@ struct BamWriter::Impl
             bam_aux_update_str( rec, "MD", -1, hit.tag_md->c_str() );
         }
         if( rr.tag_rg ) {
-            bam_aux_update_str( rec, "RG", -1, rr.tag_rg->c_str() );
+            // Explicit length, not -1/strlen(): tag_rg is a non-owning string_view that is not
+            // guaranteed to be NUL-terminated (see ReadRecord::tag_rg).
+            bam_aux_update_str(
+                rec, "RG", static_cast<int>( rr.tag_rg->size() ), rr.tag_rg->data()
+            );
         }
     }
 
